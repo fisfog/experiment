@@ -1,11 +1,11 @@
-.pyc
-.txt.gz
-.dat
+*.pyc
+*.txt.gz
+*.dat
 
-.params
-.phi
-.tassign
-.theta
+*.params
+*.phi
+*.tassign
+*.theta
 
-.base
-.test
+*.base
+*.test

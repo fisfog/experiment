@@ -50,7 +50,9 @@ class mylsvd():
 		self.dim = dim
 		self.max_iter = iters
 
-	def initializeModel(self,data,ldatheta):
+	def initializeModel(self,data,ldatheta,flag=0):
+		self.ldatheta = ldatheta
+		self.flag = flag
 		self.recordN = data.recordN
 		self.N = data.N
 		self.M = data.M
@@ -79,10 +81,8 @@ class mylsvd():
 			self.R_u[u] += 1
 		self.b_u[u] += 1
 		self.b_u /= self.beta3+self.R_u
-
 		self.p_u = randmat(data.N,self.dim)
-		self.q_i = randmat(data.M,self.dim)
-		self.q_i = ldatheta
+		self.q_i = self.ldatheta
 
 	def pred(self,u,i):
 		return self.mean+self.b_u[u]+self.b_i[i]+np.dot(self.p_u[u],self.q_i[i])
@@ -101,7 +101,8 @@ class mylsvd():
 				rmse += math.pow(eui,2)
 				self.b_u[u] += self.alpha*(eui-self.beta*self.b_u[u])
 				self.b_i[i] += self.alpha*(eui-self.beta*self.b_i[i])
-				self.q_i[i] += self.alpha*(eui*self.p_u[u]-self.beta*self.q_i[i])
+				if self.flag==0:
+					self.q_i[i] += self.alpha*(eui*self.p_u[u]-self.beta*self.q_i[i])
 				self.p_u[u] += self.alpha*(eui*self.q_i[i]-self.beta*self.p_u[u])
 			nowRmse = math.sqrt(rmse*1.0/self.recordN)
 			if nowRmse >= preRmse and abs(preRmse-nowRmse)<=1e-5 and step>=3:
@@ -179,6 +180,8 @@ class mylsvd():
 
 
 
+
+
 class RMSE():
 	"""
 	"""
@@ -196,8 +199,8 @@ class RMSE():
 		for k in xrange(self.test_recordN):
 			l = self.test[k]
 			if l[0] in data.pid_dict and l[1] in data.uid_dict:
-				self.test_row.append(data.uid_dict(l[1]))
-				self.test_col.append(data.pid_dict(l[0]))
+				self.test_row.append(data.uid_dict[l[1]])
+				self.test_col.append(data.pid_dict[l[0]])
 				self.rate.append(float(l[3]))
 				self.count += 1
 
@@ -209,4 +212,3 @@ class RMSE():
 			eui = self.rate[k]-self.model.pred(u,i)
 			rmse += math.pow(eui,2)
 		return math.sqrt(rmse*1.0/self.test_recordN)
-

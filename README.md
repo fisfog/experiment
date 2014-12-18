@@ -1,4 +1,4 @@
 # Experiment
 
-*svd
-*hft
+-svd
+-hft

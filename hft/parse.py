@@ -1,7 +1,7 @@
 #-*- coding:utf-8 -*-
 
 import gzip
-import simplejson
+# import simplejson
 import numpy as np
 import scipy as sp
 import re
@@ -72,16 +72,58 @@ class amazonData(object):
 		
 	def readdata(self,filename):
 		print "Read Data..."
+		totaldata = []
 		for e in parse(filename):
 			if e=={}:
 				break
-			rd = np.random.rand()
-			if rd<0.8:
-				if e['review/userId']!='unknown':
-					self.traindata.append([e['product/productId'],e['review/userId'],e['review/helpfulness'],e['review/score'],e['review/text']])
+			# if e['review/userId']!='unknown':
+			# 	totaldata.append([e['product/productId'],e['review/userId'],e['review/helpfulness'],e['review/score'],e['review/text']])
+			t = np.random.rand()
+			if t<0.8:
+				self.traindata.append([e['product/productId'],e['review/userId'],e['review/helpfulness'],e['review/score'],e['review/text']])
 			else:
 				self.testdata.append([e['product/productId'],e['review/userId'],e['review/helpfulness'],e['review/score'],e['review/text']])
+		# split train/test data
+		'''
+		p_dic = {}
+		u_dic = {}
+		for item in totaldata:
+			if item[0] not in p_dic:
+				p_dic[item[0]] = 1
+			else:
+				p_dic[item[0]] += 1
+			if item[1] not in u_dic:
+				u_dic[item[1]] = 1
+			else:
+				u_dic[item[1]] += 1
+		
+		# 1
+		self.ucand = [x for x in u_dic if u_dic[x] >= 2]
+		self.pcand = [x for x in p_dic if p_dic[x] >= 2]
+		for l in totaldata:
+			if l[0] in self.pcand and l[1] in self.ucand:
+				self.testdata.append(l)
+			else:
+				self.traindata.append(l)
 
+
+		# 2
+		testindex = []
+		pcount = 0
+		for pid in p_dic:
+			c = p_dic[pid]
+			c /= 3
+			for i in xrange(c):
+				rd = np.random.randint(3)
+				testindex.append(pcount+rd)
+			pcount += p_dic[pid]
+
+		for i in xrange(len(totaldata)):
+			if i in testindex:
+				self.testdata.append(totaldata[i])
+			else:
+				self.traindata.append(totaldata[i])
+		'''
 		# process traindata 
 		self.recordN = len(self.traindata)
 		print "Record No.:%d"%self.recordN
@@ -104,6 +146,12 @@ class amazonData(object):
 		print "%d user\t%d product"%(self.N,self.M)
 		self.sparsity = self.recordN*1.0/(self.N*self.M)
 		print "Mat Sparsity:%f%%"%(self.sparsity*100)
+
+		c = 0
+		for l in self.testdata:
+			if l[0] in self.pid_dict and l[1] in self.uid_dict:
+				c += 1
+		print c,c*1.0/len(self.testdata)
 
 		# process testdata
 
@@ -172,6 +220,7 @@ class amaCorpus():
 	def set_data(self,data,form):
 		start = time.time()
 		self.doc_form = form.lower()
+		# Doc orginization way: product
 		if self.doc_form == "product":
 			self.doc_num = data.M
 			self.id_doc_dict = {}
@@ -190,17 +239,38 @@ class amaCorpus():
 
 			self.docID = self.id_doc_dict.keys()
 
+			print "Build Word Dictionary"
+			self.dictionary = {}
+			count = 0
+			for pd in self.id_doc_dict:
+				rw = self.id_doc_dict[pd]
+				for w in rw:
+					if w not in self.dictionary:
+						self.dictionary[w] = count
+						count += 1
+			self.v_num = len(self.dictionary)
+			print "Total %d words in Corpus"%self.v_num
+			end = time.time()
+			print "Total time:%f"%(end-start)
 
-			# print "Build Vocabulary"
-			# discrete_set = set()
-			# for pd in self.id_doc_dict:
-			# 	rw = self.id_doc_dict[pd]
-			# 	# discrete_set = discrete_set.union(set(rw))
-			# 	for w in rw:
-			# 		discrete_set.add(w)
-			# self.v_num = len(discrete_set)
-			# self.vocab = list(discrete_set)
-			# print "Total %d words in Corpus"%self.v_num
+		# Doc orginization way: review 
+		if self.doc_form == "user":
+			self.doc_num = data.N
+			self.id_doc_dict = {}
+			for i in xrange(data.recordN):
+				uname = data.traindata[i][1]
+				if uname not in self.id_doc_dict:
+					self.id_doc_dict[uname] = []
+					self.id_doc_dict[uname].append(data.traindata[i][-1])
+				else:
+					self.id_doc_dict[uname].append(data.traindata[i][-1])
+			print "Review Text Preprocessing"
+			for pd in self.id_doc_dict:
+				rw = self.id_doc_dict[pd]
+				self.id_doc_dict[pd] = self._text_preproc(rw)
+			print "Preprocessing Complete"
+
+			self.docID = self.id_doc_dict.keys()
 
 			print "Build Word Dictionary"
 			self.dictionary = {}
@@ -216,5 +286,31 @@ class amaCorpus():
 			end = time.time()
 			print "Total time:%f"%(end-start)
 
+		# Doc orginization way: review 
+		if self.doc_form == "review":
+			self.doc_num = data.recordN
+			self.id_doc_dict = {}
+			for i in xrange(data.recordN):
+				self.id_doc_dict[i] = []
+				self.id_doc_dict[i].append(data.traindata[i][-1])
+			print "Review Text Preprocessing"
+			for pd in self.id_doc_dict:
+				rw = self.id_doc_dict[pd]
+				self.id_doc_dict[pd] = self._text_preproc(rw)
+			print "Preprocessing Complete"
+			self.docID = self.id_doc_dict.keys()
+			print "Build Word Dictionary"
+			self.dictionary = {}
+			count = 0
+			for pd in self.id_doc_dict:
+				rw = self.id_doc_dict[pd]
+				for w in rw:
+					if w not in self.dictionary:
+						self.dictionary[w] = count
+						count += 1
+			self.v_num = len(self.dictionary)
+			print "Total %d words in Corpus"%self.v_num
+			end = time.time()
+			print "Total time:%f"%(end-start)
 
 

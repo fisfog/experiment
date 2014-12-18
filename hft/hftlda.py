@@ -47,11 +47,11 @@ class myllda():
 	--max_iter: times of iterations
 
 	"""
-	def __init__(self,topic_num=5,iter=50,saveStep=10,beginSaveIters=40,result_path='./data/ldaResult/'):
+	def __init__(self,topic_num=5,it=50,ss=10,bs=40,result_path='./data/ldaResult/'):
 		self.K = topic_num
-		self.iterations = iter
-		self.saveStep = saveStep
-		self.beginSaveIters = beginSaveIters
+		self.iterations = it
+		self.saveStep = ss
+		self.beginSaveIters = bs
 		self.result_path = result_path
 
 
