@@ -47,7 +47,7 @@ class myllda():
 	--max_iter: times of iterations
 
 	"""
-	def __init__(self,topic_num=5,it=50,ss=10,bs=40,result_path='./data/ldaResult/'):
+	def __init__(self,topic_num=5,it=50,ss=10,bs=49,result_path='./data/ldaResult/'):
 		self.K = topic_num
 		self.iterations = it
 		self.saveStep = ss
@@ -214,3 +214,41 @@ class myllda():
 		print "Time: %f"%(end-start)
 
 
+
+def translate_theta(ldamodel,metadata):
+	"""
+	avg 
+	"""
+	new_theta = np.zeros((metadata.M,ldamodel.K))
+	# pidlist = metadata.pid_dict.keys()
+	count = np.zeros(metadata.M)
+	for i in xrange(metadata.recordN):
+		pid = metadata.traindata[i][0]
+		pindex = metadata.pid_dict[pid]
+		count[pindex] += 1
+		new_theta[pindex,:] += ldamodel.theta[i,:]
+	for i in xrange(len(count)):
+		new_theta[i,:] /= count[i]
+	return new_theta
+
+def h2w(h):
+	sp = h.split('/')
+	a = int(sp[0])
+	b = int(sp[1])
+	return (a*1.0+1)/(b+2)
+
+def hweighted_theta(ldamodel,metadata):
+	"""
+	use helpfulness rating weight theta
+	"""
+	new_theta = np.zeros((metadata.M,ldamodel.K))
+	c = np.zeros(metadata.M)
+	for i in xrange(metadata.recordN):
+		pid = metadata.traindata[i][0]
+		pindex = metadata.pid_dict[pid]
+		w = h2w(metadata.traindata[i][2])
+		c[pindex] += w
+		new_theta[pindex,:] += w*ldamodel.theta[i,:]
+	for i in xrange(len(c)):
+		new_theta[i,:] /= c[i]
+	return new_theta

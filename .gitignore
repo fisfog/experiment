@@ -9,3 +9,5 @@
 
 *.base
 *.test
+
+/data

@@ -76,15 +76,17 @@ class amazonData(object):
 		for e in parse(filename):
 			if e=={}:
 				break
-			# if e['review/userId']!='unknown':
-			# 	totaldata.append([e['product/productId'],e['review/userId'],e['review/helpfulness'],e['review/score'],e['review/text']])
-			t = np.random.rand()
-			if t<0.8:
-				self.traindata.append([e['product/productId'],e['review/userId'],e['review/helpfulness'],e['review/score'],e['review/text']])
-			else:
-				self.testdata.append([e['product/productId'],e['review/userId'],e['review/helpfulness'],e['review/score'],e['review/text']])
+			if e['review/userId']!='unknown':
+				totaldata.append([e['product/productId'],e['review/userId'],e['review/helpfulness'],e['review/score'],e['review/text']])
+
+			# t = np.random.rand()
+			# if t<0.8:
+			# 	self.traindata.append([e['product/productId'],e['review/userId'],e['review/helpfulness'],e['review/score'],e['review/text']])
+			# else:
+			# 	self.testdata.append([e['product/productId'],e['review/userId'],e['review/helpfulness'],e['review/score'],e['review/text']])
+		print "Total Record num:%d"%len(totaldata)
 		# split train/test data
-		'''
+		
 		p_dic = {}
 		u_dic = {}
 		for item in totaldata:
@@ -98,15 +100,17 @@ class amazonData(object):
 				u_dic[item[1]] += 1
 		
 		# 1
-		self.ucand = [x for x in u_dic if u_dic[x] >= 2]
-		self.pcand = [x for x in p_dic if p_dic[x] >= 2]
+		self.ucand = [x for x in u_dic if u_dic[x] == 1]
+		self.pcand = [x for x in p_dic if p_dic[x] == 1]
 		for l in totaldata:
-			if l[0] in self.pcand and l[1] in self.ucand:
-				self.testdata.append(l)
-			else:
-				self.traindata.append(l)
+			if l[1] not in self.ucand:
+				r = np.random.rand()
+				if r < 0.8:
+					self.traindata.append(l)
+				else:
+					self.testdata.append(l)
 
-
+		'''
 		# 2
 		testindex = []
 		pcount = 0
@@ -170,7 +174,7 @@ class amaCorpus():
 	'user': all reviews of a user as a document
 	'review': one review as a document
 
-	--id_doc_dict: dict: key:productId value:review words
+	--id_doc_dict: dict: key:docId value:review words
 
 	--vocab: Vocabulary list
 
