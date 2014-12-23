@@ -87,21 +87,21 @@ class amazonData(object):
 		print "Total Record num:%d"%len(totaldata)
 		# split train/test data
 		
-		p_dic = {}
-		u_dic = {}
+		self.p_count_dic = {}
+		self.u_count_dic = {}
 		for item in totaldata:
-			if item[0] not in p_dic:
-				p_dic[item[0]] = 1
+			if item[0] not in self.p_count_dic:
+				self.p_count_dic[item[0]] = 1
 			else:
-				p_dic[item[0]] += 1
-			if item[1] not in u_dic:
-				u_dic[item[1]] = 1
+				self.p_count_dic[item[0]] += 1
+			if item[1] not in self.u_count_dic:
+				self.u_count_dic[item[1]] = 1
 			else:
-				u_dic[item[1]] += 1
+				self.u_count_dic[item[1]] += 1
 		
 		# 1
-		self.ucand = [x for x in u_dic if u_dic[x] == 1]
-		self.pcand = [x for x in p_dic if p_dic[x] == 1]
+		self.ucand = [x for x in self.u_count_dic if self.u_count_dic[x] == 1]
+		self.pcand = [x for x in self.p_count_dic if self.p_count_dic[x] == 1]
 		for l in totaldata:
 			if l[1] not in self.ucand:
 				r = np.random.rand()
@@ -114,13 +114,13 @@ class amazonData(object):
 		# 2
 		testindex = []
 		pcount = 0
-		for pid in p_dic:
-			c = p_dic[pid]
+		for pid in self.p_count_dic:
+			c = self.p_count_dic[pid]
 			c /= 3
 			for i in xrange(c):
 				rd = np.random.randint(3)
 				testindex.append(pcount+rd)
-			pcount += p_dic[pid]
+			pcount += self.p_count_dic[pid]
 
 		for i in xrange(len(totaldata)):
 			if i in testindex:
