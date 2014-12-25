@@ -26,14 +26,16 @@ def profileTest():
 	only_svd.train_sgd()
 
 	rmse = hftsvd.RMSE(only_svd,metadata)
-	print "SVD ONLY RMSE:%f"%rmse.compute()
+	r1 = rmse.compute()
+	print "SVD ONLY RMSE:%f"%r1
 
 	lda_svd = hftsvd.mylsvd()
 	lda_svd.initializeModel(metadata,lda.theta,flag=1)
 	lda_svd.train_sgd()
 
 	rmse = hftsvd.RMSE(lda_svd,metadata)
-	print "LDA->SVD:%f"%rmse.compute()
+	r2 = rmse.compute()
+	print "LDA->SVD:%f"%r2
 
 	Corpus_r = parse.amaCorpus()
 	Corpus_r.set_data(metadata,form='review')
@@ -48,14 +50,20 @@ def profileTest():
 	hsvd.train_sgd()
 
 	rmse = hftsvd.RMSE(hsvd,metadata)
-	print "HWeighted SVD RMSE:%f"%rmse.compute()
+	r3 = rmse.compute()
+	print "HWeighted SVD RMSE:%f"%r3
 
 	wsvd = mylwsvd.WSVD()
 	wsvd.initializeModel(metadata,lda_review.theta)
 	wsvd.train_sgd()
 
 	rmse = hftsvd.RMSE(wsvd,metadata)
-	print "HLMF RMSE:%f"%rmse.compute()
+	r4 = rmse.compute()
+	print "HLMF RMSE:%f"%r4
+
+	f=open('result.txt','w')
+	f.write(filename.strip('.txt.gz')+str(r1)+str(r2)+str(r3)+str(r4)+'\n')
+	f.close()
 
 
 if __name__=='__main__':
@@ -64,6 +72,7 @@ if __name__=='__main__':
 
 
 '''
+
 filename = 'data/Shoes.txt.gz'
 path = filename.strip('.txt.gz')+'/'
 metadata = parse.amazonData()
@@ -78,12 +87,14 @@ qi = hftsvd.randmat(metadata.M,only_svd.dim)
 only_svd.initializeModel(metadata,qi,flag=0)
 only_svd.train_sgd()
 rmse = hftsvd.RMSE(only_svd,metadata)
-print "SVD ONLY RMSE:%f"%rmse.compute()
+r1 = rmse.compute()
+print "SVD ONLY RMSE:%f"%r1
 lda_svd = hftsvd.mylsvd()
 lda_svd.initializeModel(metadata,lda.theta,flag=1)
 lda_svd.train_sgd()
 rmse = hftsvd.RMSE(lda_svd,metadata)
-print "LDA->SVD:%f"%rmse.compute()
+r2 = rmse.compute()
+print "LDA->SVD:%f"%r2
 Corpus_r = parse.amaCorpus()
 Corpus_r.set_data(metadata,form='review')
 lda_review = hftlda.myllda(result_path=path+'review/')
@@ -94,10 +105,16 @@ hsvd = hftsvd.mylsvd()
 hsvd.initializeModel(metadata,newtheta,flag=1)
 hsvd.train_sgd()
 rmse = hftsvd.RMSE(hsvd,metadata)
-print "HWeighted SVD RMSE:%f"%rmse.compute()
+r3 = rmse.compute()
+print "HWeighted SVD RMSE:%f"%r3
 wsvd = mylwsvd.WSVD()
 wsvd.initializeModel(metadata,lda_review.theta)
 wsvd.train_sgd()
 rmse = hftsvd.RMSE(wsvd,metadata)
-print "HLMF RMSE:%f"%rmse.compute()
+r4 = rmse.compute()
+print "HLMF RMSE:%f"%r4
+f=open('result.txt','w')
+f.write(filename.strip('.txt.gz')+str(r1)+str(r2)+str(r3)+str(r4)+'\n')
+f.close()
+
 '''
