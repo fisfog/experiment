@@ -26,7 +26,7 @@ def h2w(h):
 class WSVD():
 	"""
 	"""
-	def __init__(self,alpha=0.005,beta0=0.1,beta1=0.02,sr=0.99,dim=5,iters=60):
+	def __init__(self,alpha=0.005,beta0=0.5,beta1=0.02,sr=0.99,dim=5,iters=60):
 		self.alpha = alpha
 		self.beta0 = beta0
 		self.beta1 = beta1
@@ -68,22 +68,42 @@ class WSVD():
 			self.R_u[u] += 1
 		self.b_u[u] += 1
 		self.b_u /= self.beta3+self.R_u
-		self.p_u = randmat(data.N,self.dim)
-		self.w = []
-		for i in xrange(self.recordN):
-			pid = data.traindata[i][0]
-			rd = np.random.rand()
-			self.w.append([rd]*data.p_count_dic[pid])
-		self.theta = ldatheta
-		self.q_i = np.zeros((self.M,self.dim))
-
-	def _cal_qi(self):
+		self.p_u = randmat(self.N,self.dim)
+		self.w = [0]*self.M
+		self.theta = [0]*self.M
+		c1 = np.zeros(self.M)
+		c2 = np.zeros(self.M)
+		# for pid in data.p_count_dic:
+		# 	rd = np.random.rand()
+		# 	self.w.append([rd]*data.p_count_dic[pid])
 		for k in xrange(self.recordN):
-			i = self.col[k]
-			for j in xrange(len(self.w[i])):
-				self.q_i[i,:] += self.w[i][j]*self.theta[i,:]
+			index = self.col[k]
+			c1[index] += self.helpfulness[k]
+			rd = np.random.rand()
+			if self.w[index] == 0:
+				self.w[index] = []
+				self.w[index].append(rd)
+				self.theta[index] = []
+				self.theta[index].append(ldatheta[k])
+				c2[index] += rd
+			else:
+				self.w[index].append(rd)
+				self.theta[index].append(ldatheta[k])
+				c2[index] += rd
+		for k in xrange(self.recordN):
+			index = self.col[k]
+			self.helpfulness[k] /= c1[index]
+		for k in xrange(self.M):
+			for i in xrange(len(self.w[k])):
+				self.w[k][i] /= c2[k]
+		# self.w = np.array(self.w)
+		# self.theta = ldatheta
+		self.q_i = randmat(self.M,self.dim)
 
 	def pred(self,u,i):
+		# x = 0
+		# for j in xrange(len(self.w[i])):
+		# 	x += self.w[i][j]*self.theta[i][j]
 		return self.mean+self.b_u[u]+self.b_i[i]+np.dot(self.p_u[u],self.q_i[i])
 
 	def train_sgd(self):
@@ -100,9 +120,10 @@ class WSVD():
 				rmse += math.pow(eui,2)
 				self.b_u[u] += self.alpha*(eui-self.beta1*self.b_u[u])
 				self.b_i[i] += self.alpha*(eui-self.beta1*self.b_i[i])
+				self.q_i = np.zeros((self.M,self.dim))
 				for j in xrange(len(self.w[i])):
-					self.w[i][j] += self.alpha*(eui*self.p_u[u]+self.beta0*(self.helpfulness[k]-self.w[i][j]))
-				self._cal_qi()
+					self.w[i][j] += self.alpha*(eui*np.dot(self.p_u[u],self.theta[i][j])+self.beta0*(self.helpfulness[k]-self.w[i][j]))
+					self.q_i[i] += self.w[i][j]*self.theta[i][j]
 				self.p_u[u] += self.alpha*(eui*self.q_i[i]-self.beta1*self.p_u[u])
 			nowRmse = math.sqrt(rmse*1.0/self.recordN)
 			if nowRmse >= preRmse and abs(preRmse-nowRmse)<=1e-5 and step>=3:

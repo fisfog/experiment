@@ -8,6 +8,7 @@ import numpy as np
 import scipy as sp
 import math
 import time
+import os
 
 def rand_mat(x, y):
 	"""
@@ -145,6 +146,8 @@ class myllda():
 	def saveIteratedModel(self,iters):
 		# lda.params,lda.phi,lda.theta,lda.tassign,lda.twords
 		# lda.params
+		if not os.path.exists(self.result_path):
+			os.mkdir(self.result_path)
 		res_Path = self.result_path
 		model_name = "lda_"+str(iters)
 		lines = []
