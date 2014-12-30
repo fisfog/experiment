@@ -161,7 +161,7 @@ class LDA():
 			top_word = np.argsort(self.phi[i])[-top_num:]
 			f.write('Topic '+str(i)+':')
 			for j in top_word:
-				f.write(str(top_word[j])+'\t')
+				f.write(str(j)+'\t')
 			f.write('\n')
 		f.close()
 

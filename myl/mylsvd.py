@@ -116,6 +116,6 @@ class SVD():
 			u = self.row[k]
 			i = self.col[k]
 			eui = self.rate[k]-self.mean
-			rmse += math.pow(eui,2)
-		return rmse*1.0/self.test_record
+			mse += math.pow(eui,2)
+		return mse*1.0/self.test_record
 

@@ -12,7 +12,7 @@ from scipy import optimize
 from utils import *
 
 class HSVD():
-	def __init__(self,dim=5,alpha=0.005,beta0=0.1,beta1=0.02,sr=0.99,iters=60):
+	def __init__(self,dim=5,alpha=0.005,beta0=0.1,beta1=0.02,sr=0.99,iters=60,l1=1,l2=2):
 		self.alpha =  alpha
 		self.beta0 = beta0
 		self.beta1 = beta1
@@ -21,6 +21,8 @@ class HSVD():
 		self.slowrate = sr
 		self.dim = dim
 		self.max_iter = iters
+		self.l1 = l1
+		self.l2 = l2
 
 	def initialize_model(self,metadata,ldatheta):
 		self.ldatheta = ldatheta
@@ -30,7 +32,7 @@ class HSVD():
 		self.row = np.array(map(lambda x:metadata.uid_dict[x],[l[1] for l in metadata.data]))
 		self.col = np.array(map(lambda x:metadata.pid_dict[x],[l[0] for l in metadata.data]))
 		self.rate = np.array([float(l[3]) for l in metadata.data])
-		self.helpfulness = np.array([h2w(l[2],1,2) for l in metadata.data])
+		self.helpfulness = np.array([h2w(l[2],self.l1,self.l2) for l in metadata.data])
 		self.train_record = int(self.total_record*0.8)
 		self.val_record = int(self.total_record*0.1)
 		self.test_record = self.total_record-self.train_record-self.val_record
@@ -73,13 +75,13 @@ class HSVD():
 			self.w[i] = [x/c1[i] for x in self.w[i]]
 			self.h[i] = [x/c2[i] for x in self.h[i]]
 
-		_update_qi()
+		self._update_qi()
 
 	def _update_qi(self):
 		self.q_i = np.zeros((self.M,self.dim))
 		for i in xrange(self.M):
 			for j in xrange(len(self.w[i])):
-				self.q_i[i] += w*self.theta[i][j]
+				self.q_i[i] += self.w[i][j]*self.theta[i][j]
 
 	def pred(self,u,i):
 		return self.mean+self.b_u[u]+self.b_i[i]+np.dot(self.p_u[u],self.q_i[i])
@@ -98,17 +100,19 @@ class HSVD():
 				rmse += math.pow(eui,2)
 				self.b_u[u] += self.alpha*(eui-self.beta1*self.b_u[u])
 				self.b_i[i] += self.alpha*(eui-self.beta1*self.b_i[i])
+				self.q_i[i] = np.array([0 for i in xrange(self.dim)])
 				for j in xrange(len(self.w[i])):
-					self.[i][j] += self.alpha*(eui*np.dot(self.p_u[u],self.theta[i][j])+\
+					self.w[i][j] += self.alpha*(eui*np.dot(self.p_u[u],self.theta[i][j])+\
 						self.beta0*(self.h[i][j]-self.w[i][j]))
-				_update_qi()
+					self.q_i[i] += self.w[i][j]*self.theta[i][j]
+				# self._update_qi()
 				self.p_u[u] += self.alpha*(eui*self.q_i[i]-self.beta1*self.p_u[u])
 			nowRmse = math.sqrt(rmse*1.0/self.train_record)
 			if nowRmse >= preRmse and abs(preRmse-nowRmse)<=1e-4 and step>=3:
 				break
 			else:
 				preRmse = nowRmse
-			print "%d\t%f"%(step,nowRmse)
+			print "%d\tRMSE:\t%f"%(step,nowRmse)
 			self.alpha *= self.slowrate
 		end = time.time()
 		print "time:%f"%(end-start)
@@ -143,6 +147,6 @@ class HSVD():
 			u = self.row[k]
 			i = self.col[k]
 			eui = self.rate[k]-self.mean
-			rmse += math.pow(eui,2)
-		return rmse*1.0/self.test_record
+			mse += math.pow(eui,2)
+		return mse*1.0/self.test_record
 

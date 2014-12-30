@@ -223,7 +223,7 @@ class amacorpus():
 		f = open(filename,'w')
 		f.write(self.doc_form+'\n')
 		for item in self.id_doc_dict:
-			f.write(item+'\t')
+			f.write(str(item)+'\t')
 			for w in self.id_doc_dict[item]:
 				f.write(w+',')
 			f.write('\n')
