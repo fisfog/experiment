@@ -9,79 +9,43 @@ import scipy as sp
 import math
 import time
 import os
+from utils import *
 
-def rand_mat(x, y):
-	"""
-	Generate a x*y matrix where the sum of every row is 1
-	"""
-	mat=[]
-	for i in xrange(x):
-		rand=[]
-		mat.append([])
-		for k in xrange(y):
-			rand.append(np.random.random())
-		norm=sum(rand)
-		for j in xrange(y):
-			mat[i].append(rand[j]*1.0/norm)
-	return np.array(mat)
-
-class myllda():
-	"""
-	LDA 
-
-	--K: NUM of topic
-	--M: NUM of document
-	--V: NUM of words in vocabulary
-
-	--doc: word index array
-
-	--n_m_k: doc-topic count
-	--n_k_t: topic-word count
-	--n_m: SUM of each row in n_m_k
-	--n_k: SUM of each row in n_k_t
-	--phi: Parameters for topic-word distribution (topic*V)
-	--theta: Parameters for doc-topic distribution (M*topic)
-	--z: topic label array
-	--alpha: doc-topic dirichlet prior parameter
-	--beta: topic-word dirichlet prior parameter
-
-	--max_iter: times of iterations
-
-	"""
-	def __init__(self,topic_num=5,it=50,ss=10,bs=49,result_path='./data/ldaResult/'):
+class LDA():
+	def __init__(self,topic_num=5,it=60,ss=5,bs=59,result_path='./ldaResult/'):
 		self.K = topic_num
 		self.iterations = it
 		self.saveStep = ss
 		self.beginSaveIters = bs
 		self.result_path = result_path
+		self.total_iters = 0
 
-
-	def initializeModel(self, data):
+	def initializeModel(self, corpus):
 		print "Initialize Model"
-		self.doc_form = data.doc_form
-		self.M = data.doc_num
-		self.V = data.v_num
+		self.doc_form = corpus.doc_form
+		self.M = corpus.doc_num
+		self.V = corpus.v_num
 		self.n_m_k = np.zeros((self.M, self.K))
 		self.n_k_t = np.zeros((self.K, self.V))
 		self.n_m = np.zeros(self.M)
 		self.n_k = np.zeros(self.K)
-		self.phi = rand_mat(self.K,self.V)
-		self.theta = rand_mat(self.M,self.K)
+		self.phi = gen_stochastic_vec(self.K,self.V)
+		self.theta = gen_stochastic_vec(self.M,self.K)
 		self.alpha = 50.0/self.K
 		self.beta = 0.1
 		# initialize documents index array
 		self.doc = []
 		for m in xrange(self.M):
 			self.doc.append([])
-			pnlist = data.id_doc_dict[data.docID[m]]
+			pnlist = corpus.id_doc_dict[corpus.docID[m]]
 			N = len(pnlist)
 			for n in xrange(N):
-				self.doc[m].append(data.dictionary[pnlist[n]])
+				self.doc[m].append(corpus.dictionary[pnlist[n]])
 
 		# initialize topic label z for each word
 		self.z = []
 		for m in xrange(self.M):
-			N = len(data.id_doc_dict[data.docID[m]])
+			N = len(corpus.id_doc_dict[corpus.docID[m]])
 			self.z.append([])
 			for n in xrange(N):
 				initTopic = np.random.randint(self.K)
@@ -191,16 +155,20 @@ class myllda():
 		f.close()
 
 		# lda.twords phi[][] K*V
-		# f = open(res_Path+model_name+'.twords','w')
-		# top_num = 20
-		# for i in xrange(self.K):
-		# 	t_word_list = []
-		# 	for j in xrange(self.V):
-		# 		t_word_list.append(j)
+		f = open(res_Path+model_name+'.twords','w')
+		top_num = 20
+		for i in xrange(self.K):
+			top_word = np.argsort(self.phi[i])[-top_num:]
+			f.write('Topic '+str(i)+':')
+			for j in top_word:
+				f.write(str(top_word[j])+'\t')
+			f.write('\n')
+		f.close()
 
 
 	def inferenceModel(self):
 		start = time.time()
+		self.total_iters += self.iterations
 		for step in xrange(self.iterations):
 			print "Iteration %d"%step
 			if step >= self.beginSaveIters and ((step-self.beginSaveIters)%self.saveStep==0):
@@ -218,41 +186,18 @@ class myllda():
 		print "Time: %f"%(end-start)
 
 
+	def read_form_file(theta_file,phi_file,tassign_file):
+		f_theta = open(theta_file)
+		self.theta = np.array([[float(x) for x in l.strip('\n\t').split('\t')] for l in f_theta])
+		f_theta.close()
 
-def translate_theta(ldamodel,metadata):
-	"""
-	avg 
-	"""
-	new_theta = np.zeros((metadata.M,ldamodel.K))
-	# pidlist = metadata.pid_dict.keys()
-	count = np.zeros(metadata.M)
-	for i in xrange(metadata.recordN):
-		pid = metadata.traindata[i][0]
-		pindex = metadata.pid_dict[pid]
-		count[pindex] += 1
-		new_theta[pindex,:] += ldamodel.theta[i,:]
-	for i in xrange(len(count)):
-		new_theta[i,:] /= count[i]
-	return new_theta
+		f_phi = open(phi_file)
+		self.phi = np.array([[float(x) for x in l.strip('\n\t').split('\t')] for l in f_phi])
+		f_phi.close()
 
-def h2w(h):
-	sp = h.split('/')
-	a = int(sp[0])
-	b = int(sp[1])
-	return (a*1.0+1)/(b+2)
+		f_tassign = open(tassign_file)
+		self.z = [[int(x.split(':')[1]) for x in l.strip('\n\t').split('\t')] for l in f_tassign]
+		f_tassign.close()
 
-def hweighted_theta(ldamodel,metadata):
-	"""
-	use helpfulness rating weight theta
-	"""
-	new_theta = np.zeros((metadata.M,ldamodel.K))
-	c = np.zeros(metadata.M)
-	for i in xrange(metadata.recordN):
-		pid = metadata.traindata[i][0]
-		pindex = metadata.pid_dict[pid]
-		w = h2w(metadata.traindata[i][2])
-		c[pindex] += w
-		new_theta[pindex,:] += w*ldamodel.theta[i,:]
-	for i in xrange(len(c)):
-		new_theta[i,:] /= c[i]
-	return new_theta
+
+

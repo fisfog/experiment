@@ -6,8 +6,10 @@
 *.phi
 *.tassign
 *.theta
+*.corpus
 
 *.base
 *.test
 
 /data
+/corpus
