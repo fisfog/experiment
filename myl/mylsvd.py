@@ -54,7 +54,7 @@ class SVD():
 		# self.b_i = np.random.random(self.M)
 
 		self.p_u = np.random.random((self.N,self.dim))
-		self.q_i = self.ldatheta
+		self.q_i = np.random.random((self.M,self.dim))
 
 	def pred(self,u,i):
 		return self.mean+self.b_u[u]+self.b_i[i]+np.dot(self.p_u[u],self.q_i[i])
@@ -75,6 +75,8 @@ class SVD():
 				self.b_i[i] += self.alpha*(eui-self.beta*self.b_i[i])
 				if self.flag:
 					self.q_i[i] += self.alpha*(eui*self.p_u[u]-self.beta*self.q_i[i])
+				else:
+					self.q_i[i] = self.ldatheta[i]
 				self.p_u[u] += self.alpha*(eui*self.q_i[i]-self.beta*self.p_u[u])
 			nowRmse = math.sqrt(rmse*1.0/self.train_record)
 			if nowRmse >= preRmse and abs(preRmse-nowRmse)<=1e-4 and step>=3:
@@ -186,7 +188,6 @@ class SVD():
 		self.p_u=re[n+m:n+m+n*d].reshape((n,d))
 		if self.flag:
 			self.q_i=re[n+m+n*d:].reshape((m,d))
-
 		end = time.time()
 		print "time:%f"%(end-start)
 
