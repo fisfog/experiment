@@ -6,6 +6,7 @@
 *.phi
 *.tassign
 *.theta
+*.twords
 *.corpus
 
 *.base

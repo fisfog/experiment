@@ -14,8 +14,8 @@ class SVD():
 	def __init__(self,dim=5,alpha=0.005,beta=0.02,sr=0.99,iters=60):
 		self.alpha =  alpha
 		self.beta = beta
-		self.beta2 = 1
-		self.beta3 = 1
+		self.beta2 = 20
+		self.beta3 = 20
 		self.slowrate = sr
 		self.dim = dim
 		self.max_iter = iters
@@ -83,6 +83,110 @@ class SVD():
 				preRmse = nowRmse
 			print "%d\t%f"%(step,nowRmse)
 			self.alpha *= self.slowrate
+		end = time.time()
+		print "time:%f"%(end-start)
+
+	def _lossfun(self,x):
+		lf = 0
+		n = self.N
+		m = self.M
+		d = self.dim
+		y1 = x[:n]
+		y2 = x[n:n+m]
+		pu = x[n+m:n+m+n*d]
+		qi = x[n+m+n*d:]
+		for k in xrange(self.train_record):
+			u = self.row[k]
+			i = self.col[k]
+			lf += (self.rate[k]-self.mean-y1[u]-y2[i]-np.dot(pu[u*d:(u+1)*d],qi[i*d:(i+1)*d]))**2
+		lf += self.beta*(np.sum(y1**2)+np.sum(y2**2)+np.sum(pu**2)+np.sum(qi**2))
+		return lf
+
+	def _fprime(self,x):
+		"""
+		Gradient
+		"""
+		n = self.N
+		m = self.M
+		d = self.dim
+		y1 = x[:n]
+		y2 = x[n:n+m]
+		pu = x[n+m:n+m+n*d]
+		qi = x[n+m+n*d:]
+		a = [0 for i in xrange(n)]
+		b = [0 for i in xrange(m)]
+		x1 = [0 for i in xrange((n*d))]
+		x2 = [0 for i in xrange((m*d))]
+		for k in xrange(self.train_record):
+			u = self.row[k]
+			i = self.col[k]
+			eui = self.rate[k]-self.mean-y1[u]-y2[i]-np.dot(pu[u*d:(u+1)*d],qi[i*d:(i+1)*d])
+			a[u] += -2*eui+2*self.beta*y1[u]
+			b[i] += -2*eui+2*self.beta*y2[i]
+			for l in xrange(d):
+				x1[u*d+l] += -2*eui*qi[i*d+l]+2*self.beta*pu[u*d+l]
+				x2[i*d+l] += -2*eui*pu[u*d+l]+2*self.beta*qi[i*d+l]
+		return np.array(a+b+x1+x2)
+
+	def _lossfun_l(self,x):
+		lf = 0
+		n = self.N
+		m = self.M
+		d = self.dim
+		y1 = x[:n]
+		y2 = x[n:n+m]
+		pu = x[n+m:n+m+n*d]
+		for k in xrange(self.train_record):
+			u = self.row[k]
+			i = self.col[k]
+			lf += (self.rate[k]-self.mean-y1[u]-y2[i]-np.dot(pu[u*d:(u+1)*d],self.q_i[i]))**2
+		lf += self.beta*(np.sum(y1**2)+np.sum(y2**2)+np.sum(pu**2))
+		return lf
+
+	def _fprime_l(self,x):
+		"""
+		Gradient
+		"""
+		n = self.N
+		m = self.M
+		d = self.dim
+		y1 = x[:n]
+		y2 = x[n:n+m]
+		pu = x[n+m:n+m+n*d]
+		a = [0 for i in xrange(n)]
+		b = [0 for i in xrange(m)]
+		x1 = [0 for i in xrange((n*d))]
+		for k in xrange(self.train_record):
+			u = self.row[k]
+			i = self.col[k]
+			eui = self.rate[k]-self.mean-y1[u]-y2[i]-np.dot(pu[u*d:(u+1)*d],self.q_i[i])
+			a[u] += -2*eui+2*self.beta*y1[u]
+			b[i] += -2*eui+2*self.beta*y2[i]
+			for l in xrange(d):
+				x1[u*d+l] += -2*eui*self.q_i[i][l]+2*self.beta*pu[u*d+l]
+		return np.array(a+b+x1)
+
+	def LBFGS(self):
+		n = self.N
+		m = self.M
+		d = self.dim
+		bu = self.b_u.reshape(self.N).tolist()
+		bi = self.b_i.reshape(self.M).tolist()
+		pu = np.random.random((n,d)).reshape(self.N*self.dim).tolist()
+		qi = np.random.random((m,d)).reshape(self.M*self.dim).tolist()
+		start = time.time()
+		if self.flag:
+			output = optimize.fmin_l_bfgs_b(self._lossfun,bu+bi+pu+qi,fprime=self._fprime,maxiter=self.max_iter)
+		else:
+			output = optimize.fmin_l_bfgs_b(self._lossfun_l,bu+bi+pu,fprime=self._fprime_l,maxiter=self.max_iter)
+		re = output[0]
+		print output[1]
+		self.b_u=re[:n]
+		self.b_i=re[n:n+m]
+		self.p_u=re[n+m:n+m+n*d].reshape((n,d))
+		if self.flag:
+			self.q_i=re[n+m+n*d:].reshape((m,d))
+
 		end = time.time()
 		print "time:%f"%(end-start)
 

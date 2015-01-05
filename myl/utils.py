@@ -49,3 +49,8 @@ def hweighted_theta(ldamodel,metadata):
 	for i in xrange(len(c)):
 		new_theta[i,:] /= c[i]
 	return new_theta
+
+def flatten(seq):
+	for item in seq:
+		for k in item:
+			yield k
