@@ -56,6 +56,11 @@ class SVD():
 		self.p_u = np.random.random((self.N,self.dim))
 		self.q_i = np.random.random((self.M,self.dim))
 
+		if not flag:
+			for k in xrange(self.train_record):
+				i = self.col[k]
+				self.q_i[i] = self.ldatheta[i]
+
 	def pred(self,u,i):
 		return self.mean+self.b_u[u]+self.b_i[i]+np.dot(self.p_u[u],self.q_i[i])
 
@@ -75,8 +80,6 @@ class SVD():
 				self.b_i[i] += self.alpha*(eui-self.beta*self.b_i[i])
 				if self.flag:
 					self.q_i[i] += self.alpha*(eui*self.p_u[u]-self.beta*self.q_i[i])
-				else:
-					self.q_i[i] = self.ldatheta[i]
 				self.p_u[u] += self.alpha*(eui*self.q_i[i]-self.beta*self.p_u[u])
 			nowRmse = math.sqrt(rmse*1.0/self.train_record)
 			if nowRmse >= preRmse and abs(preRmse-nowRmse)<=1e-4 and step>=3:
@@ -174,8 +177,8 @@ class SVD():
 		d = self.dim
 		bu = self.b_u.reshape(self.N).tolist()
 		bi = self.b_i.reshape(self.M).tolist()
-		pu = np.random.random((n,d)).reshape(self.N*self.dim).tolist()
-		qi = np.random.random((m,d)).reshape(self.M*self.dim).tolist()
+		pu = self.p_u.reshape(self.N*self.dim).tolist()
+		qi = self.q_i.reshape(self.M*self.dim).tolist()
 		start = time.time()
 		if self.flag:
 			output = optimize.fmin_l_bfgs_b(self._lossfun,bu+bi+pu+qi,fprime=self._fprime,maxiter=self.max_iter)

@@ -16,8 +16,8 @@ class HSVD():
 		self.alpha =  alpha
 		self.beta0 = beta0
 		self.beta1 = beta1
-		self.beta2 = 1
-		self.beta3 = 1
+		self.beta2 = 20
+		self.beta3 = 20
 		self.slowrate = sr
 		self.dim = dim
 		self.max_iter = iters
@@ -83,7 +83,13 @@ class HSVD():
 		for i in xrange(1,self.M):
 			self.acc_count[i] += self.acc_count[i-1]
 
-		self._update_qi()
+		# self._update_qi()
+		self.q_i = np.random.random((self.M,self.dim))
+		for k in xrange(self.train_record):
+			i = self.col[k]
+			self.q_i[i] = np.zeros(self.dim)
+			for j in xrange(self.count[i]):
+				self.q_i[i] += self.w[i][j]*self.theta[i][j]
 
 	def _update_qi(self):
 		self.q_i = np.zeros((self.M,self.dim))
