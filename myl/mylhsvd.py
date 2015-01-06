@@ -121,7 +121,7 @@ class HSVD():
 					self.q_i[i] += self.w[i][j]*self.theta[i][j]
 				self.p_u[u] += self.alpha*(eui*self.q_i[i]-self.beta1*self.p_u[u])
 			nowRmse = math.sqrt(rmse*1.0/self.train_record)
-			if nowRmse >= preRmse and abs(preRmse-nowRmse)<=1e-4 and step>=3:
+			if nowRmse <= preRmse and abs(preRmse-nowRmse)<=1e-4 and step>=3:
 				break
 			else:
 				preRmse = nowRmse

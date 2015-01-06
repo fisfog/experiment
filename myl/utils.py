@@ -54,3 +54,10 @@ def flatten(seq):
 	for item in seq:
 		for k in item:
 			yield k
+
+def result2file(res_dict,path='./',dataname):
+	f = open(path+'result.txt','a')
+	f.write(dataname+":\n")
+	for i in res_dict:
+		f.write(i+':'+str(res_dict[i])+'\n')
+	f.close()
