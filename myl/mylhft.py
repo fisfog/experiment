@@ -18,6 +18,7 @@ class HFT():
 		self.beta3 = 20
 		self.K = dim
 		self.iter_sum = it
+		self.max_iter = 30
 
 	def initialize_model(self,metadata,corpus):
 		#					 #	
@@ -81,7 +82,7 @@ class HFT():
 			for n in xrange(N):
 				initTopic = np.random.randint(self.K)
 				self.z[m].append(initTopic)
-		self.kappa = 1
+		self.kappa = 1.0
 
 	def pred(self,u,i):
 		return self.mean+self.b_u[u]+self.b_i[i]+np.dot(self.p_u[u],self.q_i[i])
@@ -115,7 +116,7 @@ class HFT():
 		for i in xrange(m):
 			N = len(self.doc[i])
 			for j in xrange(N):
-				likelihood += np.log(theta[i][self.z[i][j]]*phi[self.z[i][j]][self.doc[i][j]])
+				likelihood += np.log(theta[i][self.z[i][j]])+np.log(phi[self.z[i][j]][self.doc[i][j]])
 		likelihood *= self.mu
 		return rat_err-likelihood
 
@@ -154,7 +155,7 @@ class HFT():
 				s0 = qi[i][k]*np.exp(kp*qi[i][k])
 			for j in xrange(N):
 				s = np.sum(np.exp(kp*qi[i]))
-				qi_p[i][self.z[i][j]] -= kp-(1.0/s)
+				qi_p[i][self.z[i][j]] -= kp*(1-np.exp(kp*qi[i][self.z[i][j]])/s)
 				phi_p[self.z[i][j]][self.doc[i][j]] -= self.mu/phi[self.z[i][j]][self.doc[i][j]]
 				kp_p -= qi[i][self.z[i][j]]-s0/s
 		bu_p = bu_p.tolist()
@@ -165,7 +166,7 @@ class HFT():
 		kp_p = [kp_p]
 		return np.array(bu_p+bi_p+pu_p+qi_p+phi_p+kp_p)
 
-	def _lbgfs(self,iters=30):
+	def _lbgfs(self):
 		n = self.N
 		m = self.M
 		d = self.K
@@ -177,7 +178,7 @@ class HFT():
 		phi = self.phi.reshape(d*v).tolist()
 		kp = [self.kappa]
 		start = time.time()
-		output = optimize.fmin_l_bfgs_b(self._lossfun,bu+bi+pu+qi+phi+kp,fprime=self._fprime,maxiter=iters)
+		output = optimize.fmin_l_bfgs_b(self._lossfun,bu+bi+pu+qi+phi+kp,fprime=self._fprime,maxiter=self.max_iter)
 		
 		print "loss:%f"%output[1]
 		re = output[0]
@@ -203,7 +204,7 @@ class HFT():
 		oldtopic = self.z[d][j]
 		pzi = np.zeros(self.K)
 		for k in xrange(self.K):
-			pzi[k] = self.varphi[d][self.doc[d][j]]
+			pzi[k] = self.varphi[k][self.doc[d][j]]
 
 		# Sample a new topic label for w_{m,n}
 		# Compute cumulated probability for pzi
@@ -231,16 +232,16 @@ class HFT():
 	def train(self):
 		# parameter training for HFT
 		# bu,bi,pu,qi,phi,theta*,kappa
+		print "Begin Training, %d iteraters for one step"%self.max_iter
 
 		for step in xrange(self.iter_sum):
+			print "Step%d:"%step
 			print "update parameter using LBFGS"
 			self._lbgfs()
 			self._updata_varphi()
 			self._update_theta()
-
-			print "Step %d,MSE:%f"%(step,self.cal_train_mse())
-			print "Sample z_dj"
-			
+			print "MSE:%f"%self.cal_train_mse()
+			print "Sample z_dj"			
 			for d in xrange(self.M):
 				N = len(self.doc[d])
 				for j in xrange(N):
