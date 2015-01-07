@@ -37,12 +37,12 @@ class SVD():
 		self.b_i = np.zeros(self.M)
 		self.R_u = np.zeros(self.N)
 		self.R_i = np.zeros(self.M)
-		for k in xrange(self.train_record):
+		for k in xrange(self.total_record):
 			i = self.col[k]
 			self.b_i[i] += self.rate[k]-self.mean
 			self.R_i[i] += 1
 		self.b_i /= self.beta2+self.R_i
-		for k in xrange(self.train_record):
+		for k in xrange(self.total_record):
 			u= self.row[k]
 			i= self.col[k]
 			self.b_u[u] += self.rate[k]-self.mean-self.b_i[i]
