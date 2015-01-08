@@ -14,11 +14,12 @@ from utils import *
 class HFT():
 	def __init__(self,mu=0.1,dim=5,it=5):
 		self.mu = mu
-		self.beta2 = 20
-		self.beta3 = 20
+		self.beta2 = 1
+		self.beta3 = 1
 		self.K = dim
 		self.iter_sum = it
 		self.max_iter = 30
+		self.lbd = 0
 
 	def initialize_model(self,metadata,corpus):
 		#					 #	
@@ -26,46 +27,52 @@ class HFT():
 		#                    #
 		self.total_record = metadata.recordN
 		self.N = metadata.N
-		self.M = metadata.M 
+		self.M = metadata.M
+		self.V = corpus.v_num
 		self.row = np.array(map(lambda x:metadata.uid_dict[x],[l[1] for l in metadata.data]))
 		self.col = np.array(map(lambda x:metadata.pid_dict[x],[l[0] for l in metadata.data]))
 		self.rate = np.array([float(l[3]) for l in metadata.data])
 		self.train_record = int(self.total_record*0.8)
 		self.val_record = int(self.total_record*0.1)
 		self.test_record = self.total_record-self.train_record-self.val_record
-		self.mean = self.rate[:self.train_record].mean()
+		
+		# total number of parameters
+		self.NW = 1+1+(self.K+1)*(self.N+self.M)+self.K*self.V
+		# Initialize parameters and latent variables
+		# Zero all weights
+		self.W = np.zeros(self.NW)
+		self._get_parameter()
 
-		#					 #	
-		# init svd parameter #
-		#                    #
-		self.b_u = np.zeros(self.N)
-		self.b_i = np.zeros(self.M)
+		self.mean = self.rate[:self.train_record].mean()
+		error = self.valid_test_error()
+		print "Error offset term only (train/valid/test) = %f/%f/%f (%f)"%error
+
+		# estimate the parameters is by ddecoupling the calculation of the bi’s from the calculation of the bu’s
+
 		self.R_u = np.zeros(self.N)
 		self.R_i = np.zeros(self.M)
-		for k in xrange(self.total_record):
+		for k in xrange(self.train_record):
 			i = self.col[k]
 			self.b_i[i] += self.rate[k]-self.mean
 			self.R_i[i] += 1
 		self.b_i /= self.beta2+self.R_i
-		for k in xrange(self.total_record):
+		for k in xrange(self.train_record):
 			u= self.row[k]
 			i= self.col[k]
 			self.b_u[u] += self.rate[k]-self.mean-self.b_i[i]
 			self.R_u[u] += 1
 		self.b_u[u] += 1
 		self.b_u /= self.beta3+self.R_u
-		self.p_u = np.random.random((self.N,self.K))
-		self.q_i = np.random.random((self.M,self.K))
 
-		#					 #	
-		# init lda parameter #
-		#                    #
-		self.V = corpus.v_num
-		self.phi = gen_stochastic_vec(self.K,self.V)
-		self.theta = gen_stochastic_vec(self.M,self.K)
-		self.alpha = 50.0/self.K
-		self.beta = 0.1
-		# initialize documents index array
+		error = self.valid_test_error()
+		print "Error offset and bias (train/valid/test) = %f/%f/%f (%f)"%error
+
+		if self.lbd > 0:
+			self.mean = 0
+			self.b_u = np.zeros(self.N)
+			self.b_i = np.zeros(self.M)
+
+		# initialize topic label z for each word
 		self.doc = []
 		for m in xrange(self.M):
 			self.doc.append([])
@@ -74,7 +81,10 @@ class HFT():
 			for n in xrange(N):
 				self.doc[m].append(corpus.dictionary[pnlist[n]])
 
-		# initialize topic label z for each word
+		self.n_m_k = np.zeros((self.M, self.K))
+		self.n_k_t = np.zeros((self.K, self.V))
+		self.n_m = np.zeros(self.M)
+		self.n_k = np.zeros(self.K)
 		self.z = []
 		for m in xrange(self.M):
 			N = len(corpus.id_doc_dict[corpus.docID[m]])
@@ -82,15 +92,93 @@ class HFT():
 			for n in xrange(N):
 				initTopic = np.random.randint(self.K)
 				self.z[m].append(initTopic)
+				self.n_m_k[m][initTopic] += 1
+				self.n_k_t[initTopic][self.doc[m][n]] +=1
+				self.n_k[initTopic] += 1
+			self.n_m[m] = N
+
+		if self.lbd == 0:
+			self.p_u = np.random.random((self.N,self.K))
+			self.q_i = np.random.random((self.M,self.K))
+		else:
+			self.phi = np.zeros((self.K,self.V))
+
 		self.kappa = 1.0
+		self.phi = gen_stochastic_vec(self.K,self.V)
+		
+
+	def _get_W(self):
+		self.W[0] = self.mean
+		self.W[1] = self.kappa
+		self.W[2:2+self.N] = self.b_u
+		self.W[2+self.N:2+self.N+self.M] = self.b_i
+		self.W[2+self.N+self.M:2+self.N+self.M+self.K*self.N] = self.p_u.reshape(self.K*self.N)
+		self.W[2+self.N+self.M+self.K*self.N:2+self.N+self.M+self.K*self.N+self.K*self.M] = \
+					self.q_i.reshape(self.K*self.M)
+		self.W[2+self.N+self.M+self.K*self.N+self.K*self.M:] = self.phi.reshape(self.K*self.V)
+
+	def _get_parameter(self):
+		self.mean = self.W[0]
+		self.kappa = self.W[1]
+		self.b_u = self.W[2:2+self.N]
+		self.b_i = self.W[2+self.N:2+self.N+self.M] 
+		self.p_u = self.W[2+self.N+self.M:2+self.N+self.M+self.K*self.N].reshape((self.N,self.K))
+		self.q_i = self.W[2+self.N+self.M+self.K*self.N:2+self.N+self.M+self.K*self.N+self.K*self.M].reshape((self.M,self.K))
+		self.phi = self.W[2+self.N+self.M+self.K*self.N+self.K*self.M:].reshape((self.K,self.V))
+
+	def valid_test_error(self):
+		train = 0
+		valid = 0
+		test = 0
+		test_ste = 0
+		for k in xrange(self.train_record):
+			u = self.row[k]
+			i = self.col[k]
+			train += (self.rate[k]-self.pred(u,i))**2
+		for k in xrange(self.train_record,self.train_record+self.val_record):
+			u = self.row[k]
+			i = self.col[k]
+			valid += (self.rate[k]-self.pred(u,i))**2
+		for k in xrange(self.train_record+self.val_record,self.total_record):
+			u = self.row[k]
+			i = self.col[k]
+			err = (self.rate[k]-self.pred(u,i))**2
+			test += err
+			test_ste += err*err
+		train /= self.train_record
+		valid /= self.val_record
+		test /= self.test_record
+		test_ste /= self.test_record
+		test_ste = math.sqrt((test_ste-test*test)/self.test_record)
+		return train,valid,test,test_ste
+
+	def _word_Z(self):
+		'''
+		Compute normalization constants for all K topics
+		'''
+		self.res = np.zeros(self.K)
+		self.res = sum(np.exp(self.phi).T)
+
+	def _topic_Z(self,i):
+		'''
+		Compute normalization constant for a particular item
+		'''
+		self.res = np.sum(np.exp(self.kappa*self.q_i[i]))
+
+	def _update_topics(self,sample):
+		'''
+		Update topic assingments for each word.
+		If sample==True, this is done by sampling, otherwise it's done by maximum likelihood
+		'''
+		for k in xrange(self.train_record):
+			if x > 0 and x%100000 == 0:
+				print '.',
+			i = self.col[k]
+
+
 
 	def pred(self,u,i):
 		return self.mean+self.b_u[u]+self.b_i[i]+np.dot(self.p_u[u],self.q_i[i])
-
-	def _update_theta(self):
-		for i in xrange(self.M):
-			s = np.sum(np.exp(self.kappa*self.q_i[i]))
-			self.theta[i] = np.exp(self.kappa*self.q_i[i])/s
 
 	def _lossfun(self,x):
 		rat_err = 0
@@ -192,13 +280,10 @@ class HFT():
 		end = time.time()
 		print "time:%f"%(end-start)
 
-	def _updata_varphi(self):
-		# make phi as a sochastic vector
-		self.varphi = np.zeros((self.K,self.V))
-		for k in xrange(self.K):
-			s = np.sum(np.exp(self.phi[k]))
-			self.varphi[k] = self.phi[k]/s
 
+
+
+	
 
 	def _sampler(self,d,j):
 		oldtopic = self.z[d][j]
@@ -217,19 +302,10 @@ class HFT():
 			if u < pzi[newtopic]:
 				break
 			newtopic += 1
-
 		return newtopic
+	
 
-	def cal_train_mse(self):
-		mse = 0
-		for k in xrange(self.train_record):
-			u = self.row[k]
-			i = self.col[k]
-			eui = self.rate[k]-self.pred(u,i)
-			mse += math.pow(eui,2)
-		return math.sqrt(mse*1.0/self.train_record)
-
-	def train(self):
+	def train_lbfgs(self):
 		# parameter training for HFT
 		# bu,bi,pu,qi,phi,theta*,kappa
 		print "Begin Training, %d iteraters for one step"%self.max_iter
@@ -247,6 +323,15 @@ class HFT():
 				for j in xrange(N):
 					newtopic = self._sampler(d,j)
 					self.z[d][j] = newtopic
+
+	def cal_train_mse(self):
+		mse = 0
+		for k in xrange(self.train_record):
+			u = self.row[k]
+			i = self.col[k]
+			eui = self.rate[k]-self.pred(u,i)
+			mse += math.pow(eui,2)
+		return math.sqrt(mse*1.0/self.train_record)
 
 	def cal_val_rmse(self):
 		return math.sqrt(self.cal_val_mse())

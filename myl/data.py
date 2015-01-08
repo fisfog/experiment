@@ -243,6 +243,8 @@ class amacorpus():
 		print "Build Word Dictionary"
 		self.dictionary = {}
 		count = 0
+		self.totalwords = 0
+		self.
 		for pd in self.id_doc_dict:
 			rw = self.id_doc_dict[pd]
 			for w in rw:
@@ -250,7 +252,8 @@ class amacorpus():
 					self.dictionary[w] = count
 					count += 1
 		self.v_num = len(self.dictionary)
-		print "Total %d words in Corpus"%self.v_num
+		print "Total %d words in Dictionary"%self.v_num
+
 		
 
 
