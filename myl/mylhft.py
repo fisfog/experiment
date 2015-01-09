@@ -8,30 +8,33 @@ import numpy as np
 import scipy as sp
 import math
 import time
+from itertools import izip
 from scipy import optimize
 from utils import *
 
 class HFT():
-	def __init__(self,mu=0.1,dim=5,it=5):
-		self.mu = mu
+	def __init__(self,dim=5,em_it=50,grad_it=50,lbd=0.1,latent_reg=0):
 		self.beta2 = 1
 		self.beta3 = 1
 		self.K = dim
-		self.iter_sum = it
-		self.max_iter = 30
-		self.lbd = 0
+		self.em_iters = em_it
+		self.grad_iters = grad_it
+		self.lbd = lbd
+		self.latent_reg = latent_reg
 
-	def initialize_model(self,metadata,corpus):
+	def initialize_model(self,metadata):
 		#					 #	
 		#   read data        #
 		#                    #
 		self.total_record = metadata.recordN
+		self.id2word_dict = dict(izip(metadata.vocab_dict.itervalues(),metadata.vocab_dict.iterkeys()))
 		self.N = metadata.N
 		self.M = metadata.M
-		self.V = corpus.v_num
+		self.V = metadata.V
 		self.row = np.array(map(lambda x:metadata.uid_dict[x],[l[1] for l in metadata.data]))
 		self.col = np.array(map(lambda x:metadata.pid_dict[x],[l[0] for l in metadata.data]))
 		self.rate = np.array([float(l[3]) for l in metadata.data])
+		self.words = [l[-1] for l in metadata.data]
 		self.train_record = int(self.total_record*0.8)
 		self.val_record = int(self.total_record*0.1)
 		self.test_record = self.total_record-self.train_record-self.val_record
@@ -41,13 +44,13 @@ class HFT():
 		# Initialize parameters and latent variables
 		# Zero all weights
 		self.W = np.zeros(self.NW)
-		self._get_parameter()
+		self.mean,self.kappa,self.b_u,self.b_i,self.p_u,self.q_i,self.phi = self._get_parameter(self.W)
 
 		self.mean = self.rate[:self.train_record].mean()
 		error = self.valid_test_error()
 		print "Error offset term only (train/valid/test) = %f/%f/%f (%f)"%error
 
-		# estimate the parameters is by ddecoupling the calculation of the bi’s from the calculation of the bu’s
+		# estimate the parameters is by decoupling the calculation of the bi’s from the calculation of the bu’s
 
 		self.R_u = np.zeros(self.N)
 		self.R_i = np.zeros(self.M)
@@ -72,30 +75,23 @@ class HFT():
 			self.b_u = np.zeros(self.N)
 			self.b_i = np.zeros(self.M)
 
-		# initialize topic label z for each word
-		self.doc = []
-		for m in xrange(self.M):
-			self.doc.append([])
-			pnlist = corpus.id_doc_dict[corpus.docID[m]]
-			N = len(pnlist)
-			for n in xrange(N):
-				self.doc[m].append(corpus.dictionary[pnlist[n]])
 
 		self.n_m_k = np.zeros((self.M, self.K))
 		self.n_k_t = np.zeros((self.K, self.V))
 		self.n_m = np.zeros(self.M)
 		self.n_k = np.zeros(self.K)
-		self.z = []
-		for m in xrange(self.M):
-			N = len(corpus.id_doc_dict[corpus.docID[m]])
-			self.z.append([])
-			for n in xrange(N):
-				initTopic = np.random.randint(self.K)
-				self.z[m].append(initTopic)
-				self.n_m_k[m][initTopic] += 1
-				self.n_k_t[initTopic][self.doc[m][n]] +=1
-				self.n_k[initTopic] += 1
-			self.n_m[m] = N
+		self.z = [[] for i in xrange(self.train_record)]
+		# initialize topic label z for each word
+		for k in xrange(self.train_record):
+			i = self.col[k]
+			w = self.words[k]
+			self.n_m[i] += len(w)
+			for wp in xrange(len(w)):
+				t = np.random.randint(self.K)
+				self.z[k].append(t)
+				self.n_m_k[i][t] += 1
+				self.n_k_t[t][w[wp]] += 1
+				self.n_k[t] += 1
 
 		if self.lbd == 0:
 			self.p_u = np.random.random((self.N,self.K))
@@ -104,27 +100,32 @@ class HFT():
 			self.phi = np.zeros((self.K,self.V))
 
 		self.kappa = 1.0
-		self.phi = gen_stochastic_vec(self.K,self.V)
-		
+		# self.phi = gen_stochastic_vec(self.K,self.V)
+		self._norm_word_weights()
+		if self.lbd > 0:
+			self._update_topics(True)
 
-	def _get_W(self):
-		self.W[0] = self.mean
-		self.W[1] = self.kappa
-		self.W[2:2+self.N] = self.b_u
-		self.W[2+self.N:2+self.N+self.M] = self.b_i
-		self.W[2+self.N+self.M:2+self.N+self.M+self.K*self.N] = self.p_u.reshape(self.K*self.N)
-		self.W[2+self.N+self.M+self.K*self.N:2+self.N+self.M+self.K*self.N+self.K*self.M] = \
-					self.q_i.reshape(self.K*self.M)
-		self.W[2+self.N+self.M+self.K*self.N+self.K*self.M:] = self.phi.reshape(self.K*self.V)
+	def _get_W(self,mean,kappa,b_u,b_i,p_u,q_i,phi):
+		w = np.zeros(self.NW)
+		w[0] = mean
+		w[1] = kappa
+		w[2:2+self.N] = b_u
+		w[2+self.N:2+self.N+self.M] = b_i
+		w[2+self.N+self.M:2+self.N+self.M+self.K*self.N] = p_u.reshape(self.K*self.N)
+		w[2+self.N+self.M+self.K*self.N:2+self.N+self.M+self.K*self.N+self.K*self.M] = \
+					q_i.reshape(self.K*self.M)
+		w[2+self.N+self.M+self.K*self.N+self.K*self.M:] = phi.reshape(self.K*self.V)
+		return w
 
-	def _get_parameter(self):
-		self.mean = self.W[0]
-		self.kappa = self.W[1]
-		self.b_u = self.W[2:2+self.N]
-		self.b_i = self.W[2+self.N:2+self.N+self.M] 
-		self.p_u = self.W[2+self.N+self.M:2+self.N+self.M+self.K*self.N].reshape((self.N,self.K))
-		self.q_i = self.W[2+self.N+self.M+self.K*self.N:2+self.N+self.M+self.K*self.N+self.K*self.M].reshape((self.M,self.K))
-		self.phi = self.W[2+self.N+self.M+self.K*self.N+self.K*self.M:].reshape((self.K,self.V))
+	def _get_parameter(self,x):
+		mean = x[0]
+		kappa = x[1]
+		b_u = x[2:2+self.N]
+		b_i = x[2+self.N:2+self.N+self.M] 
+		p_u = x[2+self.N+self.M:2+self.N+self.M+self.K*self.N].reshape((self.N,self.K))
+		q_i = x[2+self.N+self.M+self.K*self.N:2+self.N+self.M+self.K*self.N+self.K*self.M].reshape((self.M,self.K))
+		phi = x[2+self.N+self.M+self.K*self.N+self.K*self.M:].reshape((self.K,self.V))
+		return mean,kappa,b_u,b_i,p_u,q_i,phi
 
 	def valid_test_error(self):
 		train = 0
@@ -156,7 +157,6 @@ class HFT():
 		'''
 		Compute normalization constants for all K topics
 		'''
-		self.res = np.zeros(self.K)
 		self.res = sum(np.exp(self.phi).T)
 
 	def _topic_Z(self,i):
@@ -171,191 +171,153 @@ class HFT():
 		If sample==True, this is done by sampling, otherwise it's done by maximum likelihood
 		'''
 		for k in xrange(self.train_record):
-			if x > 0 and x%100000 == 0:
+			if k > 0 and k%100000 == 0:
 				print '.',
 			i = self.col[k]
+			u = self.row[k]
+			w = self.words[k]
+			topics = self.z[k]
+			for wp in xrange(len(w)):
+				wi = w[wp]
+				pw = np.zeros(self.K)
+				pw = np.exp(self.kappa*self.q_i[i]+self.phi.T[wi])
+				s = np.sum(pw)
+				pw /= s
+				newtopic = 0
+				if sample:
+					for i in xrange(1,self.K):
+						pw[i] += pw[i-1]
+					u = np.random.rand()*pw[-1]
+					while newtopic < self.K:
+						if u < pw[newtopic]:
+							break
+						newtopic += 1
+				else:
+					newtopic = np.argmax(pw)
 
-
+				if newtopic != topics[wp]:
+					t = topics[wp]
+					self.n_k_t[t][wi] -= 1
+					self.n_k_t[newtopic][wi] +=1
+					self.n_k[t] -= 1
+					self.n_k[newtopic] += 1
+					self.n_m_k[i][t] -= 1
+					self.n_m_k[i][newtopic] += 1
+					self.z[k][wp] = newtopic
 
 	def pred(self,u,i):
 		return self.mean+self.b_u[u]+self.b_i[i]+np.dot(self.p_u[u],self.q_i[i])
 
-	def _lossfun(self,x):
-		rat_err = 0
-		likelihood = 0
-		n = self.N
-		m = self.M
-		d = self.K
-		v = self.V
-		bu = x[:n]
-		bi = x[n:n+m]
-		pu = np.array(x[n+m:n+m+n*d]).reshape((n,d))
-		qi = np.array(x[n+m+n*d:n+m+n*d+m*d]).reshape((m,d))
-		phi = np.array(x[n+m+n*d+m*d:n+m+n*d+m*d+d*v]).reshape((d,v))
-		kp = x[-1]
+
+	def _lsq(self,x):
+		'''
+		Compute the energy according to the least_squares criterion
+		'''
+
+		lsq_start = time.time()
+
+		mean,kappa,b_u,b_i,p_u,q_i,phi = self._get_parameter(x)
+		res = 0
 		for k in xrange(self.train_record):
 			u = self.row[k]
 			i = self.col[k]
-			rat_err += (self.rate[k]-bu[u]-bi[i]-np.dot(pu[u],qi[i]))**2
-		theta = np.zeros((m,d))
-		for i in xrange(m):
-			s = np.sum(np.exp(kp*qi[i]))
-			theta[i] = np.exp(kp*qi[i])/s
-		for i in xrange(m):
-			N = len(self.doc[i])
-			for j in xrange(N):
-				likelihood += np.log(theta[i][self.z[i][j]])+np.log(phi[self.z[i][j]][self.doc[i][j]])
-		likelihood *= self.mu
-		return rat_err-likelihood
+			rate = self.rate[k]
+			res += (mean+b_u[u]+b_i[i]+np.dot(p_u[u],q_i[i])-rate)**2
 
-	def _fprime(self,x):
-		n = self.N
-		m = self.M
-		d = self.K
-		v = self.V
-		bu = x[:n]
-		bi = x[n:n+m]
-		pu = np.array(x[n+m:n+m+n*d]).reshape((n,d))
-		qi = np.array(x[n+m+n*d:n+m+n*d+m*d]).reshape((m,d))
-		phi = np.array(x[n+m+n*d+m*d:n+m+n*d+m*d+d*v]).reshape((d,v))
-		kp = x[-1]
-		bu_p = np.zeros(n)
-		bi_p = np.zeros(m)
-		pu_p = np.zeros((n,d))
-		qi_p = np.zeros((m,d))
-		phi_p = np.zeros((d,v))
-		kp_p = 0
-		for k in xrange(self.train_record):
-			u = self.row[k]
-			i = self.col[k]
-			eui = self.rate[k]-bu[u]-bi[i]-np.dot(pu[u],qi[i])
-			bu_p[u] -= 2*eui
-			bi_p[i] -= 2*eui
-			pu_p[u] -= 2*eui*qi[i]
-			qi_p[i] -= 2*eui*pu[u]
-		theta = np.zeros((m,d))
-		for i in xrange(m):
-			s = np.sum(np.exp(kp*qi[i]))
-			theta[i] = np.exp(kp*qi[i])/s
-		for i in xrange(m):
-			N = len(self.doc[i])
-			for k in xrange(d):
-				s0 = qi[i][k]*np.exp(kp*qi[i][k])
-			for j in xrange(N):
-				s = np.sum(np.exp(kp*qi[i]))
-				qi_p[i][self.z[i][j]] -= kp*(1-np.exp(kp*qi[i][self.z[i][j]])/s)
-				phi_p[self.z[i][j]][self.doc[i][j]] -= self.mu/phi[self.z[i][j]][self.doc[i][j]]
-				kp_p -= qi[i][self.z[i][j]]-s0/s
-		bu_p = bu_p.tolist()
-		bi_p = bi_p.tolist()
-		pu_p = pu_p.reshape(n*d).tolist()
-		qi_p = qi_p.reshape(m*d).tolist()
-		phi_p = phi_p.reshape(d*v).tolist()
-		kp_p = [kp_p]
-		return np.array(bu_p+bi_p+pu_p+qi_p+phi_p+kp_p)
+		for b in xrange(self.M):
+			self._topic_Z(b)
+			lZ = np.log(self.res)
+			for k in xrange(self.K):
+				res += -self.lbd*self.n_m_k[b][k]*(kappa*q_i[b][k]-lZ)
 
-	def _lbgfs(self):
-		n = self.N
-		m = self.M
-		d = self.K
-		v = self.V
-		bu = self.b_u.tolist()
-		bi = self.b_i.tolist()
-		pu = self.p_u.reshape(n*d).tolist()
-		qi = self.q_i.reshape(m*d).tolist()
-		phi = self.phi.reshape(d*v).tolist()
-		kp = [self.kappa]
-		start = time.time()
-		output = optimize.fmin_l_bfgs_b(self._lossfun,bu+bi+pu+qi+phi+kp,fprime=self._fprime,maxiter=self.max_iter)
-		
-		print "loss:%f"%output[1]
-		re = output[0]
-		self.b_u = np.array(re[:n])
-		self.b_i = np.array(re[n:n+m])
-		self.p_u = np.array(re[n+m:n+m+n*d]).reshape((n,d))
-		self.q_i = np.array(re[n+m+n*d:n+m+n*d+m*d]).reshape((m,d))
-		self.phi = np.array(re[n+m+n*d+m*d:n+m+n*d+m*d+d*v]).reshape((d,v))
-		self.kappa = re[-1]
+		if self.latent_reg > 0:
+			res += self.latent_reg*(np.sum(p_u**2)+np.sum(q_i**2))
 
-		end = time.time()
-		print "time:%f"%(end-start)
-
-
-
-
-	
-
-	def _sampler(self,d,j):
-		oldtopic = self.z[d][j]
-		pzi = np.zeros(self.K)
+		self._word_Z()
 		for k in xrange(self.K):
-			pzi[k] = self.varphi[k][self.doc[d][j]]
+			lZ = np.log(self.res[k])
+			for w in xrange(self.V):
+				res += -self.lbd*self.n_k_t[k][w]*(phi[k][w]-lZ)
 
-		# Sample a new topic label for w_{m,n}
-		# Compute cumulated probability for pzi
-		for k in xrange(1,self.K):
-			pzi[k] += pzi[k-1]
+		lsq_end = time.time()
 
-		u = np.random.rand()*pzi[-1]
-		newtopic = 0
-		while newtopic < self.K:
-			if u < pzi[newtopic]:
-				break
-			newtopic += 1
-		return newtopic
-	
+		return res
 
-	def train_lbfgs(self):
-		# parameter training for HFT
-		# bu,bi,pu,qi,phi,theta*,kappa
-		print "Begin Training, %d iteraters for one step"%self.max_iter
+	def _dl(self,x):
+		'''
+		Derivative of the energy function
+		'''
+		dl_start = time.time()
 
-		for step in xrange(self.iter_sum):
-			print "Step%d:"%step
-			print "update parameter using LBFGS"
-			self._lbgfs()
-			self._updata_varphi()
-			self._update_theta()
-			print "MSE:%f"%self.cal_train_mse()
-			print "Sample z_dj"			
-			for d in xrange(self.M):
-				N = len(self.doc[d])
-				for j in xrange(N):
-					newtopic = self._sampler(d,j)
-					self.z[d][j] = newtopic
-
-	def cal_train_mse(self):
-		mse = 0
+		mean,kappa,b_u,b_i,p_u,q_i,phi = self._get_parameter(x)
+		w = np.zeros(self.NW)
+		dmean,dkappa,db_u,db_i,dp_u,dq_i,dphi = self._get_parameter(w)
 		for k in xrange(self.train_record):
 			u = self.row[k]
 			i = self.col[k]
-			eui = self.rate[k]-self.pred(u,i)
-			mse += math.pow(eui,2)
-		return math.sqrt(mse*1.0/self.train_record)
+			rate = self.rate[k]
+			dl = 2*(mean+b_u[u]+b_i[i]+np.dot(p_u[u],q_i[i])-rate)
+			dmean += dl
+			db_u[u] += dl
+			db_i[i] += dl
+			dp_u[u] += dl*q_i[i]
+			dq_i[i] += dl*p_u[u]
 
-	def cal_val_rmse(self):
-		return math.sqrt(self.cal_val_mse())
+		for b in xrange(self.M):
+			self._topic_Z(b)
+			q = -self.lbd*(self.n_m_k[b]-self.n_m[b]*np.exp(kappa*q_i[b]/self.res))
+			dq_i[b] += kappa*q
+			dkappa += np.dot(q_i[b],q)
 
-	def cal_val_mse(self):
-		mse = 0
-		for k in xrange(self.train_record,self.train_record+self.val_record):
-			u = self.row[k]
-			i = self.col[k]
-			eui = self.rate[k]-self.pred(u,i)
-			mse += math.pow(eui,2)
-		return math.sqrt(mse*1.0/self.val_record)	
+		if self.latent_reg > 0:
+			dp_u += self.latent_reg*2*p_u
+			dq_i += self.latent_reg*2*q_i
 
-	def cal_test_rmse(self):
-		return math.sqrt(self.cal_test_mse())
+		self._word_Z()
+		for w in xrange(self.V):
+			for k in xrange(self.K):
+				twc = self.n_k_t[k][w]
+				ex = np.exp(phi[k][w])
+				dphi[k][w] += -self.lbd*(twc-self.n_k[k]*ex/self.res[k])
+		w = self._get_W(dmean,dkappa,db_u,db_i,dp_u,dq_i,dphi)
+		return w
 
-	def cal_test_mse(self):
-		mse = 0
-		for k in xrange(self.train_record+self.val_record,self.total_record):
-			u = self.row[k]
-			i = self.col[k]
-			eui = self.rate[k]-self.pred(u,i)
-			mse += math.pow(eui,2)
-		return mse*1.0/self.test_record
+	def disp_top_words(self):
+		print "Top wors for each topic:"
+		for k in xrange(self.K):
+			bestwordid = np.argsort(self.phi[k])[-10:]
+			print "Topic%d:"%k,
+			for w in bestwordid:
+				print self.id2word_dict[w],
+			print '\n'
+
+	def _norm_word_weights(self):
+		s = self.phi.sum(axis=0)
+		for k in xrange(self.K):
+			self.phi[k] -= s
+
+	
+	def train(self):
+		# parameter training for HFT
+		# mean,kappa,bu,bi,pu,qi,phi
+		best_valid = 1e8
+		for emi in xrange(self.em_iters):
+			self.w = self._get_W(self.mean,self.kappa,self.b_u,self.b_i,self.p_u,self.q_i,self.phi)
+			output = optimize.fmin_l_bfgs_b(func=self._lsq,x0=self.w,fprime=self._dl,maxiter=self.grad_iters)
+			print "energy after gradient setp = %f"%output[1]
+			self.mean,self.kappa,self.b_u,self.b_i,self.p_u,self.q_i,self.phi = self._get_parameter(output[0])
+
+			if self.lbd>0:
+				self._update_topics(True)
+				self._norm_word_weights()
+				self.disp_top_words()
+
+			error = self.valid_test_error()
+			print "Error offset term only (train/valid/test) = %f/%f/%f (%f)"%error
+
+			if error[1]<best_valid:
+				best_valid = error[1]
+
 
 
 

@@ -44,23 +44,87 @@ def load_stop_words(sw_file_path):
 	sw_file.close()
 	return StopWords
 
-class amadata(object):
-	def __init__(self,filename):
+class amadata_proc(object):
+	PUNCTUATION = ['(', ')', ':', ';', ',', '-', '!', '.', '?', '/', '"', '*']
+	CARRIAGE_RETURNS = ['\n', '\r\n']
+	WORD_REGEX = "^[a-z']+$"
+	def __init__(self,filename,sw_file_path = '../data/stopwords.txt'):
+		start = time.time()
+		self.StopWords = load_stop_words(sw_file_path)
 		print "Reading Data..."
 		self.data = [[e['product/productId'],e['review/userId'],\
-					e['review/helpfulness'],e['review/score'],e['review/text']] \
+					e['review/helpfulness'],e['review/score'],e['review/time'],e['review/text']] \
 					for e in parse(filename) if e!={} and e['review/userId']!='unknown']
 		self.recordN = len(self.data)
 		print "Total Record num:%d"%self.recordN
+		print "Review Text Preprocessing"
+		self.words = [self._text_preproc([x[-1]]) for x in self.data]
+		end = time.time()
+		print "Preprocessing Complete, time:%f"%(end-start)
+
+	def write2file(self,outfile):
+		f = open(outfile,'w')
+		for k in xrange(self.recordN):
+			f.write(self.data[k][0]+'\t'+self.data[k][1]+'\t'+self.data[k][2]+'\t'+self.data[k][3]+'\t'+\
+				self.data[k][4]+'\t')
+			for w in self.words[k]:
+				f.write(w+',')
+			f.write('\n')
+		f.close()
+
+	def _clean_word(self,word):
+		"""
+		Convert words to lowercase
+		Del the PUNCTUATION and CARRIAGE_RETURNS
+		"""
+		word = word.lower()
+		for punc in amacorpus.PUNCTUATION+amacorpus.CARRIAGE_RETURNS:
+			word = word.replace(punc,"").strip("'")
+		return word if re.match(amacorpus.WORD_REGEX,word) else None
+
+	def _text_preproc(self,textlist):
+		"""
+		Text Preprocessing
+		Include:
+		1.Clean word
+		2.Participle
+		3.Spell checking
+		4.Stemming
+		"""
+		text = []
+		ck = enchant.Dict("en_US")
+		porter = nltk.PorterStemmer()
+		for line in textlist:
+			words =  nltk.word_tokenize(line)
+			# words = line.split(' ')
+			for w in words:
+				clean_word = self._clean_word(w)
+				if clean_word and ck.check(clean_word) and \
+				clean_word not in self.StopWords and len(clean_word)>1:
+					text.append(porter.stem(clean_word))
+		return text
+
+
+class amameta():
+	def __init__(self,datafile):
+		print "Read data"
+		f = open(datafile)
+		self.data = [l.strip('\n').split('\t') for l in f]
+		f.close()
+		self.recordN = len(self.data)
+		for k in xrange(self.recordN):
+			self.data[k][-1] = self.data[k][-1].strip(',').split(',')
+		# shuffle the data
 		np.random.shuffle(self.data)
 
+		# code users and items
 		self.uid_dict = {}
 		self.pid_dict = {}
-		ucount = 0
-		pcount = 0
-		for i in xrange(self.recordN):
-			pname = self.data[i][0]
-			uname = self.data[i][1]
+		ucount = 0 
+		pcount = 0 
+		for k in xrange(self.recordN):
+			pname = self.data[k][0]
+			uname = self.data[k][1]
 			if pname not in self.pid_dict:
 				self.pid_dict[pname] = pcount
 				pcount += 1
@@ -69,21 +133,24 @@ class amadata(object):
 				ucount += 1
 		self.N = len(self.uid_dict)
 		self.M = len(self.pid_dict)
-		print "%d user\t%d product"%(self.N,self.M)
+		print "%d users\t%d products"%(self.N,self.M)
 		self.sparsity = self.recordN*1.0/(self.N*self.M)
 		print "Mat Sparsity:%f%%"%(self.sparsity*100)
 
-		self.p_count_dic = {}
-		self.u_count_dic = {}
-		for item in self.data:
-			if item[0] not in self.p_count_dic:
-				self.p_count_dic[item[0]] = 1
-			else:
-				self.p_count_dic[item[0]] += 1
-			if item[1] not in self.u_count_dic:
-				self.u_count_dic[item[1]] = 1
-			else:
-				self.u_count_dic[item[1]] += 1
+		# build vocabulary dict
+		self.vocab_dict = {}
+		wcount = 0
+		for i in xrange(self.recordN):
+			for w in self.data[i][-1]:
+				if w not in self.vocab_dict:
+					self.vocab_dict[w] = wcount
+					wcount += 1
+		self.V = len(self.vocab_dict)
+		print "Total %d words"%self.V
+
+		for k in xrange(self.recordN):
+			self.data[k][-1] = [self.vocab_dict[x] for x in self.data[k][-1]]
+
 
 class amacorpus():
 	PUNCTUATION = ['(', ')', ':', ';', ',', '-', '!', '.', '?', '/', '"', '*']
@@ -219,6 +286,14 @@ class amacorpus():
 			end = time.time()
 			print "Total time:%f"%(end-start)
 
+	def text_proc(self,meta):
+		print "Review Text Preprocessing"
+		self.words = [[] for i in xrange(meta.recordN)]
+		for k in xrange(meta.recordN):
+			self.words[k] = self._text_preproc([meta.data[k][-1]])
+		print "Preprocessing Complete"
+
+
 	def write2file(self,filename):
 		f = open(filename,'w')
 		f.write(self.doc_form+'\n')
@@ -243,8 +318,6 @@ class amacorpus():
 		print "Build Word Dictionary"
 		self.dictionary = {}
 		count = 0
-		self.totalwords = 0
-		self.
 		for pd in self.id_doc_dict:
 			rw = self.id_doc_dict[pd]
 			for w in rw:
