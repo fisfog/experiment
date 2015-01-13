@@ -86,11 +86,11 @@ class HFT():
 			i = self.col[k]
 			w = self.words[k]
 			self.n_m[i] += len(w)
-			for wp in xrange(len(w)):
+			for wp in w:
 				t = np.random.randint(self.K)
 				self.z[k].append(t)
 				self.n_m_k[i][t] += 1
-				self.n_k_t[t][w[wp]] += 1
+				self.n_k_t[t][wp] += 1
 				self.n_k[t] += 1
 
 		if self.lbd == 0:
@@ -100,7 +100,7 @@ class HFT():
 			self.phi = np.zeros((self.K,self.V))
 
 		self.kappa = 1.0
-		# self.phi = gen_stochastic_vec(self.K,self.V)
+		self.varphi = gen_stochastic_vec(self.K,self.V)
 		self._norm_word_weights()
 		if self.lbd > 0:
 			self._update_topics(True)
@@ -157,13 +157,13 @@ class HFT():
 		'''
 		Compute normalization constants for all K topics
 		'''
-		self.res = sum(np.exp(self.phi).T)
+		self.res = np.exp(self.phi).sum(axis=1)
 
 	def _topic_Z(self,i):
 		'''
 		Compute normalization constant for a particular item
 		'''
-		self.res = np.sum(np.exp(self.kappa*self.q_i[i]))
+		self.res = np.exp(self.kappa*self.q_i[i]).sum()
 
 	def _update_topics(self,sample):
 		'''
@@ -180,7 +180,7 @@ class HFT():
 			for wp in xrange(len(w)):
 				wi = w[wp]
 				pw = np.zeros(self.K)
-				pw = np.exp(self.kappa*self.q_i[i]+self.phi.T[wi])
+				pw = np.exp(self.kappa*self.q_i[i]+self.varphi.T[wi])
 				s = np.sum(pw)
 				pw /= s
 				newtopic = 0
@@ -263,11 +263,12 @@ class HFT():
 			dp_u[u] += dl*q_i[i]
 			dq_i[i] += dl*p_u[u]
 
-		for b in xrange(self.M):
-			self._topic_Z(b)
-			q = -self.lbd*(self.n_m_k[b]-self.n_m[b]*np.exp(kappa*q_i[b]/self.res))
-			dq_i[b] += kappa*q
-			dkappa += np.dot(q_i[b],q)
+		for i in xrange(self.M):
+			self._topic_Z(i)
+			qtZ = np.sum(q_i[i]*np.exp(kappa*q_i[i]))
+			for k in xrange(self.K):
+				dq_i[i] += -self.lbd*kappa*self.n_m_k[i][k]*(1-np.exp(kappa*q_i[i][k])/self.res)
+				dkappa += -self.lbd*self.n_m_k[i][k]*(q_i[i][k]-qtZ/self.res)
 
 		if self.latent_reg > 0:
 			dp_u += self.latent_reg*2*p_u
@@ -276,25 +277,24 @@ class HFT():
 		self._word_Z()
 		for w in xrange(self.V):
 			for k in xrange(self.K):
-				twc = self.n_k_t[k][w]
 				ex = np.exp(phi[k][w])
-				dphi[k][w] += -self.lbd*(twc-self.n_k[k]*ex/self.res[k])
+				dphi[k][w] += -self.lbd*self.n_k_t[k][w]*(1-ex/self.res[k])
 		w = self._get_W(dmean,dkappa,db_u,db_i,dp_u,dq_i,dphi)
 		return w
 
 	def disp_top_words(self):
 		print "Top wors for each topic:"
 		for k in xrange(self.K):
-			bestwordid = np.argsort(self.phi[k])[-10:]
+			bestwordid = np.argsort(self.varphi[k])[-10:]
 			print "Topic%d:"%k,
 			for w in bestwordid:
 				print self.id2word_dict[w],
 			print '\n'
 
 	def _norm_word_weights(self):
-		s = self.phi.sum(axis=0)
+		self._word_Z()
 		for k in xrange(self.K):
-			self.phi[k] -= s
+			self.varphi[k] = np.exp(self.phi[k])/self.res[k]
 
 	
 	def train(self):
