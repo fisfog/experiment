@@ -8,6 +8,7 @@
 *.theta
 *.twords
 *.corpus
+*.votes
 
 *.base
 *.test

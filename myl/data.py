@@ -78,9 +78,9 @@ class amadata_proc(object):
 		Del the PUNCTUATION and CARRIAGE_RETURNS
 		"""
 		word = word.lower()
-		for punc in amacorpus.PUNCTUATION+amacorpus.CARRIAGE_RETURNS:
+		for punc in self.PUNCTUATION+self..CARRIAGE_RETURNS:
 			word = word.replace(punc,"").strip("'")
-		return word if re.match(amacorpus.WORD_REGEX,word) else None
+		return word if re.match(self.WORD_REGEX,word) else None
 
 	def _text_preproc(self,textlist):
 		"""
@@ -331,3 +331,46 @@ class amacorpus():
 
 
 
+# test
+class amad():
+	def __init__(self,datafile):
+		print "Read data"
+		f = open(datafile)
+		self.data = [l.strip('\n').split() for l in f]
+		f.close()
+		self.recordN = len(self.data)
+		# shuffle the data
+		# np.random.shuffle(self.data)
+
+		# code users and items
+		self.uid_dict = {}
+		self.pid_dict = {}
+		ucount = 0 
+		pcount = 0 
+		for k in xrange(self.recordN):
+			pname = self.data[k][1]
+			uname = self.data[k][0]
+			if pname not in self.pid_dict:
+				self.pid_dict[pname] = pcount
+				pcount += 1
+			if uname not in self.uid_dict:
+				self.uid_dict[uname] = ucount
+				ucount += 1
+		self.N = len(self.uid_dict)
+		self.M = len(self.pid_dict)
+		print "%d users\t%d products"%(self.N,self.M)
+		self.sparsity = self.recordN*1.0/(self.N*self.M)
+		print "Mat Sparsity:%f%%"%(self.sparsity*100)
+
+		# build vocabulary dict
+		self.vocab_dict = {}
+		wcount = 0
+		for i in xrange(self.recordN):
+			for w in self.data[i][5:]:
+				if w not in self.vocab_dict:
+					self.vocab_dict[w] = wcount
+					wcount += 1
+		self.V = len(self.vocab_dict)
+		print "Total %d words"%self.V
+
+		self.words = [[self.vocab_dict[w] for w in l[5:]] for l in self.data]

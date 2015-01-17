@@ -31,22 +31,58 @@ class HFT():
 		self.N = metadata.N
 		self.M = metadata.M
 		self.V = metadata.V
-		self.row = np.array(map(lambda x:metadata.uid_dict[x],[l[1] for l in metadata.data]))
-		self.col = np.array(map(lambda x:metadata.pid_dict[x],[l[0] for l in metadata.data]))
-		self.rate = np.array([float(l[3]) for l in metadata.data])
-		self.words = [l[-1] for l in metadata.data]
-		self.train_record = int(self.total_record*0.8)
-		self.val_record = int(self.total_record*0.1)
-		self.test_record = self.total_record-self.train_record-self.val_record
+		
+		self.row = np.array(map(lambda x:metadata.uid_dict[x],[l[0] for l in metadata.data]))
+		self.col = np.array(map(lambda x:metadata.pid_dict[x],[l[1] for l in metadata.data]))
+		self.rate = np.array([float(l[2]) for l in metadata.data])
+		self.words = metadata.words
+
+		self.vote_per_user = [[] for i in xrange(self.N)]
+		self.vote_per_item = [[] for i in xrange(self.M)]
+		self.train_vote_per_user = [[] for i in xrange(self.N)]
+		self.train_vote_per_item = [[] for i in xrange(self.M)]
+		for k in xrange(self.total_record):
+			self.vote_per_user[self.row[k]].append(k)
+		for u in xrange(self.N):
+			for k in self.vote_per_user[u]:
+				self.vote_per_item[self.col[k]].append(k)
+
+		self.test_votes = []
+		self.valid_votes = []
+		self.train_votes = []
+
+		test_fraction = 0.1
+		if self.total_record > 2400000:
+			train_fraction = 2000000.0/self.total_record
+			test_fraction = (1.0 - train_fraction)/2
+
+		for k in xrange(self.total_record):
+			r = np.random.random()
+			if r < test_fraction:
+				self.test_votes.append(k)
+			elif r < 2*test_fraction:
+				self.valid_votes.append(k)
+			else:
+				self.train_votes.append(k)
+				u = self.row[k]
+				i = self.col[k]
+				self.train_vote_per_user[u].append(k)
+				self.train_vote_per_item[i].append(k)
+		self.n_training_per_user = [len(x) for x in self.train_vote_per_user]
+		self.n_training_per_item = [len(x) for x in self.train_vote_per_item]
+
+		# self.train_record = int(self.total_record*0.8)
+		# self.val_record = int(self.total_record*0.1)
+		# self.test_record = self.total_record-self.train_record-self.val_record
 		
 		# total number of parameters
 		self.NW = 1+1+(self.K+1)*(self.N+self.M)+self.K*self.V
 		# Initialize parameters and latent variables
 		# Zero all weights
-		self.W = np.zeros(self.NW)
-		self.mean,self.kappa,self.b_u,self.b_i,self.p_u,self.q_i,self.phi = self._get_parameter(self.W)
+		self.w = np.zeros(self.NW)
+		self.mean,self.kappa,self.b_u,self.b_i,self.p_u,self.q_i,self.phi = self._get_parameter(self.w)
 
-		self.mean = self.rate[:self.train_record].mean()
+		self.mean = self.rate[self.train_votes].mean()
 		error = self.valid_test_error()
 		print "Error offset term only (train/valid/test) = %f/%f/%f (%f)"%error
 
@@ -54,12 +90,12 @@ class HFT():
 
 		self.R_u = np.zeros(self.N)
 		self.R_i = np.zeros(self.M)
-		for k in xrange(self.train_record):
+		for k in self.train_votes:
 			i = self.col[k]
 			self.b_i[i] += self.rate[k]-self.mean
 			self.R_i[i] += 1
 		self.b_i /= self.beta2+self.R_i
-		for k in xrange(self.train_record):
+		for k in self.train_votes:
 			u= self.row[k]
 			i= self.col[k]
 			self.b_u[u] += self.rate[k]-self.mean-self.b_i[i]
@@ -76,14 +112,17 @@ class HFT():
 			self.b_i = np.zeros(self.M)
 
 
+		# generate random topic assignments
 		self.n_m_k = np.zeros((self.M, self.K))
 		self.n_k_t = np.zeros((self.K, self.V))
 		self.n_m = np.zeros(self.M)
 		self.n_k = np.zeros(self.K)
-		self.z = [[] for i in xrange(self.train_record)]
-		# initialize topic label z for each word
-		for k in xrange(self.train_record):
+		self.z = {}
+
+		for k in self.train_votes:
 			i = self.col[k]
+			if k not in self.z:
+				self.z[k] = []
 			w = self.words[k]
 			self.n_m[i] += len(w)
 			for wp in w:
@@ -93,17 +132,27 @@ class HFT():
 				self.n_k_t[t][wp] += 1
 				self.n_k[t] += 1
 
+		# initialize the background word frequency
+		totalwords = 0
+		self.background_words = np.zeros(self.V)
+		for k in self.train_votes:
+			for w in self.words[k]:
+				totalwords += 1
+				self.background_words[w] += 1
+
+		self.background_words /= totalwords
+
 		if self.lbd == 0:
 			self.p_u = np.random.random((self.N,self.K))
 			self.q_i = np.random.random((self.M,self.K))
 		else:
 			self.phi = np.zeros((self.K,self.V))
 
-		self.kappa = 1.0
-		self.varphi = gen_stochastic_vec(self.K,self.V)
+		
 		self._norm_word_weights()
 		if self.lbd > 0:
 			self._update_topics(True)
+		self.kappa = 1.0
 
 	def _get_W(self,mean,kappa,b_u,b_i,p_u,q_i,phi):
 		w = np.zeros(self.NW)
@@ -132,55 +181,54 @@ class HFT():
 		valid = 0
 		test = 0
 		test_ste = 0
-		for k in xrange(self.train_record):
+		for k in self.train_votes:
 			u = self.row[k]
 			i = self.col[k]
 			train += (self.rate[k]-self.pred(u,i))**2
-		for k in xrange(self.train_record,self.train_record+self.val_record):
+		for k in self.valid_votes:
 			u = self.row[k]
 			i = self.col[k]
 			valid += (self.rate[k]-self.pred(u,i))**2
-		for k in xrange(self.train_record+self.val_record,self.total_record):
+		for k in self.test_votes:
 			u = self.row[k]
 			i = self.col[k]
 			err = (self.rate[k]-self.pred(u,i))**2
 			test += err
 			test_ste += err*err
-		train /= self.train_record
-		valid /= self.val_record
-		test /= self.test_record
-		test_ste /= self.test_record
-		test_ste = math.sqrt((test_ste-test*test)/self.test_record)
+		train /= len(self.train_votes)
+		valid /= len(self.valid_votes)
+		test /= len(self.test_votes)
+		test_ste /= len(self.test_votes)
+		test_ste = math.sqrt((test_ste-test*test)/len(self.test_votes))
 		return train,valid,test,test_ste
 
-	def _word_Z(self):
+	def _word_Z(self,phi):
 		'''
 		Compute normalization constants for all K topics
 		'''
-		self.res = np.exp(self.phi).sum(axis=1)
+		self.res = np.zeros(self.K)
+		for w in xrange(self.V):
+			self.res += np.exp(self.background_words[w]+phi.T[w]).sum()
 
-	def _topic_Z(self,i):
+	def _topic_Z(self,i,kp,q_i):
 		'''
 		Compute normalization constant for a particular item
 		'''
-		self.res = np.exp(self.kappa*self.q_i[i]).sum()
+		self.res = np.exp(kp*q_i[i]).sum()
 
 	def _update_topics(self,sample):
 		'''
 		Update topic assingments for each word.
 		If sample==True, this is done by sampling, otherwise it's done by maximum likelihood
 		'''
-		for k in xrange(self.train_record):
-			if k > 0 and k%100000 == 0:
-				print '.',
+		for k in self.train_votes:
 			i = self.col[k]
 			u = self.row[k]
 			w = self.words[k]
 			topics = self.z[k]
 			for wp in xrange(len(w)):
 				wi = w[wp]
-				pw = np.zeros(self.K)
-				pw = np.exp(self.kappa*self.q_i[i]+self.varphi.T[wi])
+				pw = np.exp(self.kappa*self.q_i[i]+self.background_words[wi]+self.phi.T[wi])
 				s = np.sum(pw)
 				pw /= s
 				newtopic = 0
@@ -215,17 +263,18 @@ class HFT():
 		'''
 
 		lsq_start = time.time()
+		print '.',
 
 		mean,kappa,b_u,b_i,p_u,q_i,phi = self._get_parameter(x)
 		res = 0
-		for k in xrange(self.train_record):
+		for k in self.train_votes:
 			u = self.row[k]
 			i = self.col[k]
 			rate = self.rate[k]
 			res += (mean+b_u[u]+b_i[i]+np.dot(p_u[u],q_i[i])-rate)**2
 
 		for b in xrange(self.M):
-			self._topic_Z(b)
+			self._topic_Z(b,kappa,q_i)
 			lZ = np.log(self.res)
 			for k in xrange(self.K):
 				res += -self.lbd*self.n_m_k[b][k]*(kappa*q_i[b][k]-lZ)
@@ -233,11 +282,11 @@ class HFT():
 		if self.latent_reg > 0:
 			res += self.latent_reg*(np.sum(p_u**2)+np.sum(q_i**2))
 
-		self._word_Z()
+		self._word_Z(phi)
 		for k in xrange(self.K):
 			lZ = np.log(self.res[k])
 			for w in xrange(self.V):
-				res += -self.lbd*self.n_k_t[k][w]*(phi[k][w]-lZ)
+				res += -self.lbd*self.n_k_t[k][w]*(self.background_words[w]+phi[k][w]-lZ)
 
 		lsq_end = time.time()
 
@@ -252,50 +301,89 @@ class HFT():
 		mean,kappa,b_u,b_i,p_u,q_i,phi = self._get_parameter(x)
 		w = np.zeros(self.NW)
 		dmean,dkappa,db_u,db_i,dp_u,dq_i,dphi = self._get_parameter(w)
-		for k in xrange(self.train_record):
-			u = self.row[k]
-			i = self.col[k]
-			rate = self.rate[k]
-			dl = 2*(mean+b_u[u]+b_i[i]+np.dot(p_u[u],q_i[i])-rate)
-			dmean += dl
-			db_u[u] += dl
-			db_i[i] += dl
-			dp_u[u] += dl*q_i[i]
-			dq_i[i] += dl*p_u[u]
+		# for k in xrange(self.train_record):
+		# 	u = self.row[k]
+		# 	i = self.col[k]
+		# 	rate = self.rate[k]
+		# 	dl = 2*(mean+b_u[u]+b_i[i]+np.dot(p_u[u],q_i[i])-rate)
+		# 	dmean += dl
+		# 	db_u[u] += dl
+		# 	db_i[i] += dl
+		# 	dp_u[u] += dl*q_i[i]
+		# 	dq_i[i] += dl*p_u[u]
+
+		# for i in xrange(self.M):
+		# 	self._topic_Z(i,kappa,q_i)
+		# 	# qtZ = np.sum(q_i[i]*np.exp(kappa*q_i[i]))
+		# 	for k in xrange(self.K):
+		# 		# dq_i[i] += -self.lbd*kappa*self.n_m_k[i][k]*(1-np.exp(kappa*q_i[i][k])/self.res)
+		# 		# dkappa += -self.lbd*self.n_m_k[i][k]*(q_i[i][k]-qtZ/self.res)
+		# 		q = -self.lbd*(self.n_m_k[i][k]-self.n_m[i]*np.exp(kappa*q_i[i][k])/self.res)
+		# 		dq_i[i][k] += kappa*q
+		# 		dkappa += q_i[i][k]*q
+
+		# if self.latent_reg > 0:
+		# 	dp_u += self.latent_reg*2*p_u
+		# 	dq_i += self.latent_reg*2*q_i
+
+		# self._word_Z(phi)
+		# for w in xrange(self.V):
+		# 	for k in xrange(self.K):
+		# 		ex = np.exp(self.background_words[w]+phi[k][w])
+		# 		dphi[k][w] += -self.lbd*(self.n_k_t[k][w]-self.n_k[k]*ex/self.res[k])
+
+		for u in xrange(self.N):
+			for k in self.train_vote_per_user[u]:
+				i = self.col[k]
+				rate = self.rate[k]
+				p = mean+b_u[u]+b_i[i]+np.dot(p_u[u],q_i[i])
+				dl = 2*(p-rate)
+				dmean += dl
+				db_u[u] += dl
+				dp_u[u] += dl*q_i[i]
 
 		for i in xrange(self.M):
-			self._topic_Z(i)
-			qtZ = np.sum(q_i[i]*np.exp(kappa*q_i[i]))
-			for k in xrange(self.K):
-				dq_i[i] += -self.lbd*kappa*self.n_m_k[i][k]*(1-np.exp(kappa*q_i[i][k])/self.res)
-				dkappa += -self.lbd*self.n_m_k[i][k]*(q_i[i][k]-qtZ/self.res)
+			for k in self.train_vote_per_item[i]:
+				u = self.col[k]
+				rate = self.rate[k]
+				p = mean+b_u[u]+b_i[i]+np.dot(p_u[u],q_i[i])
+				dl = 2*(p-rate)
+				db_i[i] += dl
+				dq_i[i] += dl*p_u[u]
+
+		for i in xrange(self.M):
+			self._topic_Z(i,kappa,q_i)
+			q = -self.lbd*(self.n_m_k[i]-self.n_m[i]*np.exp(kappa*q_i[i]/self.res))
+			dq_i[i] += kappa * q
+			dkappa += np.dot(q_i[i],q)
 
 		if self.latent_reg > 0:
 			dp_u += self.latent_reg*2*p_u
 			dq_i += self.latent_reg*2*q_i
 
-		self._word_Z()
+		self._word_Z(phi)
 		for w in xrange(self.V):
-			for k in xrange(self.K):
-				ex = np.exp(phi[k][w])
-				dphi[k][w] += -self.lbd*self.n_k_t[k][w]*(1-ex/self.res[k])
+			ex = np.exp(self.background_words[w]+self.phi.T[w])
+			dphi.T[w] += -self.lbd*(self.n_k_t.T[w]-self.n_k*ex/self.res)
+
 		w = self._get_W(dmean,dkappa,db_u,db_i,dp_u,dq_i,dphi)
 		return w
 
 	def disp_top_words(self):
-		print "Top wors for each topic:"
+		print "Top words for each topic:"
 		for k in xrange(self.K):
-			bestwordid = np.argsort(self.varphi[k])[-10:]
+			bestwordid = np.argsort(self.phi[k])[-10:]
 			print "Topic%d:"%k,
 			for w in bestwordid:
 				print self.id2word_dict[w],
 			print '\n'
 
 	def _norm_word_weights(self):
-		self._word_Z()
-		for k in xrange(self.K):
-			self.varphi[k] = np.exp(self.phi[k])/self.res[k]
-
+		for w in xrange(self.V):
+			av = self.phi.T[w].sum()
+			av /= self.K
+			self.phi.T[w] -= av
+			self.background_words[w] += av
 	
 	def train(self):
 		# parameter training for HFT
@@ -303,9 +391,11 @@ class HFT():
 		best_valid = 1e8
 		for emi in xrange(self.em_iters):
 			self.w = self._get_W(self.mean,self.kappa,self.b_u,self.b_i,self.p_u,self.q_i,self.phi)
-			output = optimize.fmin_l_bfgs_b(func=self._lsq,x0=self.w,fprime=self._dl,maxiter=self.grad_iters)
-			print "energy after gradient setp = %f"%output[1]
-			self.mean,self.kappa,self.b_u,self.b_i,self.p_u,self.q_i,self.phi = self._get_parameter(output[0])
+			# output = optimize.fmin_l_bfgs_b(func=self._lsq,x0=self.w,fprime=self._dl,maxiter=self.grad_iters)
+			output = optimize.minimize(self._lsq,x0=self.w,method='L-BFGS-B',jac=self._dl,options={'maxiter':self.grad_iters})
+			# print "energy after gradient setp = %f"%output[1]
+			print "energy after gradient setp = %f"%output.fun
+			self.mean,self.kappa,self.b_u,self.b_i,self.p_u,self.q_i,self.phi = self._get_parameter(output.x)
 
 			if self.lbd>0:
 				self._update_topics(True)
@@ -317,17 +407,3 @@ class HFT():
 
 			if error[1]<best_valid:
 				best_valid = error[1]
-
-
-
-
-
-
-
-
-
-
-
-
-
-

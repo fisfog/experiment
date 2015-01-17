@@ -12,19 +12,22 @@ import os
 from utils import *
 
 class LDA():
-	def __init__(self,topic_num=5,it=60,ss=5,bs=59,result_path='./ldaResult/'):
+	def __init__(self,topic_num=5,it=60,ss=5,bs=59,form,result_path='./ldaResult/'):
 		self.K = topic_num
 		self.iterations = it
 		self.saveStep = ss
 		self.beginSaveIters = bs
 		self.result_path = result_path
 		self.total_iters = 0
+		self.form = form
 
-	def initializeModel(self, corpus):
+	def initializeModel(self, meta):
 		print "Initialize Model"
-		self.doc_form = corpus.doc_form
-		self.M = corpus.doc_num
-		self.V = corpus.v_num
+		
+
+
+		self.M = meta.
+		self.V = meta.v_num
 		self.n_m_k = np.zeros((self.M, self.K))
 		self.n_k_t = np.zeros((self.K, self.V))
 		self.n_m = np.zeros(self.M)
@@ -37,15 +40,15 @@ class LDA():
 		self.doc = []
 		for m in xrange(self.M):
 			self.doc.append([])
-			pnlist = corpus.id_doc_dict[corpus.docID[m]]
+			pnlist = meta.id_doc_dict[meta.docID[m]]
 			N = len(pnlist)
 			for n in xrange(N):
-				self.doc[m].append(corpus.dictionary[pnlist[n]])
+				self.doc[m].append(meta.dictionary[pnlist[n]])
 
 		# initialize topic label z for each word
 		self.z = []
 		for m in xrange(self.M):
-			N = len(corpus.id_doc_dict[corpus.docID[m]])
+			N = len(meta.id_doc_dict[meta.docID[m]])
 			self.z.append([])
 			for n in xrange(N):
 				initTopic = np.random.randint(self.K)
